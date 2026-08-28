@@ -1718,7 +1718,7 @@ function renderEmbedGenerator() {
       <div class="form-group" style="margin-bottom: 20px;">
         <label class="form-label">Public share link</label>
         <div class="share-link-row">
-          <input class="form-input" id="share-link-text" value="${escapeHtml(getEmbedUrl('all'))}" readonly />
+          <a class="share-link-display" id="share-link-text" href="${escapeHtml(getEmbedUrl('all'))}" target="_blank" rel="noopener noreferrer">${escapeHtml(getEmbedUrl('all'))}</a>
           <button class="btn btn-secondary" type="button" onclick="copyShareLink()">${getIconSvg('copy')} Copy Share Link</button>
         </div>
       </div>
@@ -1760,7 +1760,10 @@ function updateEmbedGenerator(scope) {
   const shareLink = document.getElementById("share-link-text");
   const preview = document.getElementById("embed-preview");
   if (codeBlock) codeBlock.innerText = buildEmbedCode(scope);
-  if (shareLink) shareLink.value = getEmbedUrl(scope);
+  if (shareLink) {
+    shareLink.textContent = getEmbedUrl(scope);
+    shareLink.href = getEmbedUrl(scope);
+  }
   if (preview) {
     preview.style.height = "760px";
     preview.src = getEmbedUrl(scope);
@@ -1786,7 +1789,7 @@ async function copyEmbedCode() {
 }
 
 async function copyShareLink() {
-  const link = document.getElementById("share-link-text")?.value || "";
+  const link = document.getElementById("share-link-text")?.textContent || "";
   try {
     await navigator.clipboard.writeText(link);
     showToast("Share link copied to clipboard!");
