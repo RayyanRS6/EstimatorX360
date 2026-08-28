@@ -243,9 +243,20 @@ function verifySessionToken(token) {
   }
 }
 
+function isAdminAuthenticated(req) {
+  return verifySessionToken(parseCookies(req.headers.cookie)[COOKIE_NAME]);
+}
+
 function requireAdmin(req, res, next) {
-  const token = parseCookies(req.headers.cookie)[COOKIE_NAME];
-  if (!verifySessionToken(token)) return sendError(res, 401, 'Administrator authentication required.');
+  if (!isAdminAuthenticated(req)) return sendError(res, 401, 'Administrator authentication required.');
+  next();
+}
+
+function requireAdminPage(req, res, next) {
+  if (!isAdminAuthenticated(req)) {
+    res.set('Cache-Control', 'no-store');
+    return res.redirect(302, '/login');
+  }
   next();
 }
 
@@ -582,7 +593,7 @@ app.get('/api/embed/config', (_req, res) => {
 });
 
 app.get('/api/admin/session', (req, res) => {
-  const authenticated = verifySessionToken(parseCookies(req.headers.cookie)[COOKIE_NAME]);
+  const authenticated = isAdminAuthenticated(req);
   res.set('Cache-Control', 'no-store').json({ authenticated, webhookConfigured: Boolean(process.env.GHL_WEBHOOK_URL) });
 });
 
@@ -774,7 +785,18 @@ function sendFrontendFile(filename, cacheControl, crossOrigin = false) {
   };
 }
 
-app.get(['/', '/index.html'], sendFrontendFile('index.html', 'no-store'));
+app.get('/', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.redirect(302, isAdminAuthenticated(req) ? '/app' : '/login');
+});
+app.get('/login', (req, res, next) => {
+  if (isAdminAuthenticated(req)) {
+    res.set('Cache-Control', 'no-store');
+    return res.redirect(302, '/app');
+  }
+  return sendFrontendFile('login.html', 'no-store')(req, res, next);
+});
+app.get(['/app', '/index.html'], requireAdminPage, sendFrontendFile('index.html', 'no-store'));
 app.get('/embed', sendFrontendFile('index.html', 'no-store', true));
 app.get('/app.js', sendFrontendFile('app.js', IS_PRODUCTION ? 'public, max-age=3600' : 'no-store', true));
 app.get('/styles.css', sendFrontendFile('styles.css', IS_PRODUCTION ? 'public, max-age=3600' : 'no-store', true));

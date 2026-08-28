@@ -79,6 +79,12 @@ Saved webhook URLs are stored in a separate server-only Firestore collection. Th
 
 The generated `/embed` page contains only the public calculator. It excludes the navigation, form builder, webhook settings, and administrator session lookup. Its resize message contains only a numeric height, and the generated parent script verifies both the iframe window and its origin before resizing. The main dashboard cannot be framed by external sites.
 
+### Private dashboard and public form links
+
+The root URL redirects unauthenticated visitors to `/login`. The dashboard routes (`/app` and `/index.html`) are enforced by the server and require the signed administrator session cookie. This is not a client-side visibility toggle: without a valid session, the dashboard HTML is never served.
+
+Public recipients use the links produced by the Embed Generator. `/embed` exposes all forms, `/embed?category=...` exposes one category, and `/embed?service=...` opens one form directly. These public routes intentionally contain no dashboard navigation or administrator controls.
+
 ---
 
 ## 📦 Webhook Payload Format Sent to GHL

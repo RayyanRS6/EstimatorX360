@@ -123,6 +123,105 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* --- PRIVATE DASHBOARD SIGN-IN --- */
+body.lock-page {
+  min-height: 100vh;
+  height: auto;
+  max-height: none;
+  overflow: auto;
+  padding: 24px;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 18% 16%, rgba(250, 88, 56, 0.14), transparent 30%),
+    radial-gradient(circle at 82% 78%, rgba(18, 19, 22, 0.08), transparent 32%),
+    var(--bg-dashboard);
+}
+
+.lock-shell {
+  width: min(100%, 460px);
+}
+
+.lock-card {
+  padding: 42px;
+  border: 1px solid var(--border-color);
+  border-radius: 28px;
+  background: var(--bg-card);
+  box-shadow: 0 28px 80px rgba(18, 19, 22, 0.12);
+}
+
+.lock-brand-mark {
+  width: 58px;
+  height: 58px;
+  margin-bottom: 24px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-coral);
+  color: #FFFFFF;
+  box-shadow: 0 12px 28px rgba(250, 88, 56, 0.3);
+}
+
+.lock-eyebrow {
+  margin-bottom: 8px;
+  color: var(--accent-coral);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.lock-card h1 {
+  margin-bottom: 12px;
+  font-family: var(--font-heading);
+  font-size: clamp(30px, 7vw, 40px);
+  line-height: 1.05;
+  letter-spacing: -1px;
+}
+
+.lock-description {
+  margin-bottom: 28px;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.lock-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lock-submit {
+  width: 100%;
+  min-height: 46px;
+  justify-content: center;
+}
+
+.lock-submit:disabled {
+  cursor: wait;
+  opacity: 0.7;
+  transform: none;
+}
+
+.lock-error {
+  min-height: 20px;
+  color: #DC2626;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.lock-footnote {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: center;
+}
+
 /* Outer Wrapper Dashboard Container */
 .dashboard-app {
   width: 100%;
@@ -1907,6 +2006,15 @@ body.dark-theme .breakdown-item {
 }
 
 @media (max-width: 480px) {
+  body.lock-page {
+    padding: 14px;
+  }
+
+  .lock-card {
+    padding: 30px 22px;
+    border-radius: 22px;
+  }
+
   .brand-logo {
     font-size: 16px;
   }
