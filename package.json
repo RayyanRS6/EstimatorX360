@@ -1,0 +1,22 @@
+{
+  "name": "bridgeland-price-guide",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure price estimator and admin builder",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check app.js",
+    "audit": "npm audit --omit=dev"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^8.7.1",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.1",
+    "helmet": "^8.1.0"
+  }
+}
