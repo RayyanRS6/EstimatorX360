@@ -15,6 +15,7 @@ const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || '';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
+const SESSION_TOKEN_VERSION = 1;
 const COOKIE_NAME = IS_PRODUCTION ? '__Host-priceguide_admin' : 'priceguide_admin';
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || '';
 const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || '(default)';
@@ -225,6 +226,7 @@ function sign(value) {
 
 function createSessionToken() {
   const payload = Buffer.from(JSON.stringify({
+    v: SESSION_TOKEN_VERSION,
     exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
     nonce: crypto.randomBytes(18).toString('base64url')
   })).toString('base64url');
@@ -237,7 +239,7 @@ function verifySessionToken(token) {
   if (!payload || !signature || extra || !safeEqual(signature, sign(payload))) return false;
   try {
     const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return Number.isInteger(decoded.exp) && decoded.exp > Math.floor(Date.now() / 1000);
+    return decoded.v === SESSION_TOKEN_VERSION && Number.isInteger(decoded.exp) && decoded.exp > Math.floor(Date.now() / 1000);
   } catch {
     return false;
   }
