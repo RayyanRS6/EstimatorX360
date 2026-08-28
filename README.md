@@ -21,6 +21,8 @@ It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CA
 
 3. **No-Code Form & Price Builder**:
    - Create new services or edit existing ones.
+   - Create, rename, and remove form categories, and assign each form to any number of categories.
+   - Existing forms without category data are automatically treated as Residential.
    - Prevent duplicate form names regardless of capitalization or repeated whitespace.
    - Modify Base Costs (call-out or minimum charges).
    - Add/delete questions, toggle Single Choice vs Multiple Choice.
@@ -32,8 +34,9 @@ It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CA
    - Assigns a separate protected GHL inbound webhook to every form.
    - Includes lead details, estimates, an itemized answer array, and separate plain-text `answer_fields` values for mapping every question independently.
 
-5. **Easy GHL iFrame Embedding**:
-   - Includes ready-to-copy HTML code block for GHL Custom Code elements.
+5. **Flexible Sharing and GHL iFrame Embedding**:
+   - Share or embed all forms, every form in one category, or one individual form.
+   - Includes ready-to-copy public links and HTML code for GHL Custom Code elements.
 
 ---
 
@@ -69,9 +72,10 @@ Saved webhook URLs are stored in a separate server-only Firestore collection. Th
 ### Step 3: Authorize and embed the calculator
 1. Set `FRAME_ANCESTORS` in the private `.env` file if adding custom domains (by default, `self`, `http://localhost:*`, `http://127.0.0.1:*`, `https://bridgelandbuilders.com`, and `https://*.bridgelandbuilders.com` are allowed).
 2. Open the **Embed Generator** tab in AutomateX360.
-3. Choose **All service forms** or one specific service and click **Copy Embed Code**.
-4. In GHL Page Builder, drag a **Custom Code / HTML** element onto your landing page.
-5. Paste the code into the Custom HTML editor, save, and publish.
+3. Choose **All forms**, one category, or one specific form.
+4. Use **Copy Share Link** for a standalone public calculator URL, or **Copy Embed Code** for an iframe.
+5. In GHL Page Builder, drag a **Custom Code / HTML** element onto your landing page.
+6. Paste the code into the Custom HTML editor, save, and publish.
 
 The generated `/embed` page contains only the public calculator. It excludes the navigation, form builder, webhook settings, and administrator session lookup. Its resize message contains only a numeric height, and the generated parent script verifies both the iframe window and its origin before resizing. The main dashboard cannot be framed by external sites.
 
@@ -138,7 +142,7 @@ Then open `http://localhost:3000`. The generated administrator password is store
 
 ### Firestore server authentication
 
-The application has no local/default service catalogue. It reads the `services` collection directly from Firestore and fails closed when the database is unavailable.
+The application has no local/default service catalogue. It reads the `services` and `categories` collections directly from Firestore and fails closed when the database is unavailable. If the `categories` collection is initially empty, the server exposes a default Residential category and assigns legacy service documents to it; the first administrator save persists that migration.
 
 For local or non-Google hosting, set `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` from a least-privilege Firebase service account. On Google Cloud hosting, use Application Default Credentials and set `FIREBASE_USE_ADC=true`. A Firebase browser API key is not a server credential.
 
