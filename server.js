@@ -19,9 +19,11 @@ const COOKIE_NAME = IS_PRODUCTION ? '__Host-priceguide_admin' : 'priceguide_admi
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || '';
 const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || '(default)';
 const FIRESTORE_SERVICES_COLLECTION = process.env.FIRESTORE_SERVICES_COLLECTION || 'services';
+const FIRESTORE_CATEGORIES_COLLECTION = process.env.FIRESTORE_CATEGORIES_COLLECTION || 'categories';
 const FIRESTORE_WEBHOOK_CONFIGS_COLLECTION = process.env.FIRESTORE_WEBHOOK_CONFIGS_COLLECTION || 'webhook_configs';
 const CURRENCY_CODE = 'CAD';
 const CURRENCY_LOCALE = 'en-CA';
+const DEFAULT_CATEGORY = Object.freeze({ id: 'residential', name: 'Residential' });
 
 if (ADMIN_PASSWORD.length < 16) {
   throw new Error('ADMIN_PASSWORD must be at least 16 characters. Set it in .env.');
@@ -38,8 +40,14 @@ if (!/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(FIREBASE_PROJECT_ID)) {
 if (!/^[a-zA-Z0-9_-]{1,80}$/.test(FIRESTORE_SERVICES_COLLECTION)) {
   throw new Error('FIRESTORE_SERVICES_COLLECTION is invalid.');
 }
-if (!/^[a-zA-Z0-9_-]{1,80}$/.test(FIRESTORE_WEBHOOK_CONFIGS_COLLECTION) || FIRESTORE_WEBHOOK_CONFIGS_COLLECTION === FIRESTORE_SERVICES_COLLECTION) {
-  throw new Error('FIRESTORE_WEBHOOK_CONFIGS_COLLECTION is invalid or conflicts with the services collection.');
+if (!/^[a-zA-Z0-9_-]{1,80}$/.test(FIRESTORE_CATEGORIES_COLLECTION)) {
+  throw new Error('FIRESTORE_CATEGORIES_COLLECTION is invalid.');
+}
+if (!/^[a-zA-Z0-9_-]{1,80}$/.test(FIRESTORE_WEBHOOK_CONFIGS_COLLECTION)) {
+  throw new Error('FIRESTORE_WEBHOOK_CONFIGS_COLLECTION is invalid.');
+}
+if (new Set([FIRESTORE_SERVICES_COLLECTION, FIRESTORE_CATEGORIES_COLLECTION, FIRESTORE_WEBHOOK_CONFIGS_COLLECTION]).size !== 3) {
+  throw new Error('Firestore collection names must be unique.');
 }
 
 const firebaseClientEmail = process.env.FIREBASE_CLIENT_EMAIL || '';
@@ -47,6 +55,7 @@ const firebasePrivateKey = (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n
 const useApplicationDefaultCredentials = process.env.FIREBASE_USE_ADC === 'true' || Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS);
 let firestore = null;
 let servicesCollection = null;
+let categoriesCollection = null;
 let webhookConfigsCollection = null;
 if (firebaseClientEmail || firebasePrivateKey || useApplicationDefaultCredentials) {
   if (!firebaseClientEmail || !firebasePrivateKey) {
@@ -66,6 +75,7 @@ if (firebaseClientEmail || firebasePrivateKey || useApplicationDefaultCredential
   }
   firestore = new Firestore(firestoreOptions);
   servicesCollection = firestore.collection(FIRESTORE_SERVICES_COLLECTION);
+  categoriesCollection = firestore.collection(FIRESTORE_CATEGORIES_COLLECTION);
   webhookConfigsCollection = firestore.collection(FIRESTORE_WEBHOOK_CONFIGS_COLLECTION);
 }
 
@@ -290,8 +300,27 @@ function hasValidImageSignature(buffer, contentType) {
   return false;
 }
 
-function validateServices(input) {
+function validateCategories(input) {
   if (!Array.isArray(input) || input.length < 1 || input.length > 30) return null;
+  const categoryIds = new Set();
+  const categoryNames = new Set();
+  const result = [];
+
+  for (const category of input) {
+    const id = cleanString(category?.id, 80, true);
+    const name = cleanString(category?.name, 120, true);
+    const normalizedName = normalizeName(name);
+    if (!id || !/^[a-z0-9][a-z0-9-]*$/i.test(id) || categoryIds.has(id) || !name || categoryNames.has(normalizedName)) return null;
+    categoryIds.add(id);
+    categoryNames.add(normalizedName);
+    result.push({ id, name });
+  }
+  return result;
+}
+
+function validateServices(input, categories = [DEFAULT_CATEGORY]) {
+  if (!Array.isArray(input) || input.length < 1 || input.length > 30) return null;
+  const categoryIds = new Set(categories.map(category => category.id));
   const serviceIds = new Set();
   const serviceTitles = new Set();
   const questionIds = new Set();
@@ -302,8 +331,12 @@ function validateServices(input) {
     const title = cleanString(service?.title, 120, true);
     const icon = cleanString(service?.icon || 'house', 40, true);
     const baseCost = cleanMoney(service?.baseCost);
+    const rawCategoryIds = service?.categoryIds === undefined ? [DEFAULT_CATEGORY.id] : service.categoryIds;
     const normalizedTitle = normalizeName(title);
     if (!id || !/^[a-z0-9][a-z0-9-]*$/i.test(id) || serviceIds.has(id) || !title || serviceTitles.has(normalizedTitle) || !icon || baseCost === null) return null;
+    if (!Array.isArray(rawCategoryIds) || rawCategoryIds.length > 30) return null;
+    const cleanCategoryIds = [...new Set(rawCategoryIds.map(categoryId => cleanString(categoryId, 80, true)))];
+    if (cleanCategoryIds.some(categoryId => !categoryId || !categoryIds.has(categoryId))) return null;
     if (!Array.isArray(service.questions) || service.questions.length > 50) return null;
     serviceIds.add(id);
     serviceTitles.add(normalizedTitle);
@@ -339,31 +372,57 @@ function validateServices(input) {
       }
       questions.push({ id: qid, title: qtitle, type: question.type, options });
     }
-    result.push({ id, title, icon, baseCost, questions });
+    result.push({ id, title, icon, baseCost, categoryIds: cleanCategoryIds, questions });
   }
   return result;
 }
 
-async function readServices() {
+async function readCategories() {
+  if (!categoriesCollection) throw new Error('Firestore server credentials are not configured.');
+  const snapshot = await categoriesCollection.get();
+  if (snapshot.empty) return [{ ...DEFAULT_CATEGORY }];
+  const stored = snapshot.docs.map(document => ({ id: document.id, ...document.data() }));
+  const validated = validateCategories(stored);
+  if (!validated) throw new Error('Firestore category data failed validation.');
+  return validated;
+}
+
+async function readServices(categories) {
   if (!servicesCollection) throw new Error('Firestore server credentials are not configured.');
+  const availableCategories = categories || await readCategories();
   const snapshot = await servicesCollection.get();
   if (snapshot.empty) throw new Error('No services are configured in Firestore.');
   const stored = snapshot.docs.map(document => ({ id: document.id, ...document.data() }));
-  const validated = validateServices(stored);
+  const validated = validateServices(stored, availableCategories);
   if (!validated) throw new Error('Firestore service data failed validation.');
   return validated;
 }
 
-async function writeServices(services) {
-  if (!firestore || !servicesCollection) throw new Error('Firestore server credentials are not configured.');
-  const existing = await servicesCollection.get();
+async function readCatalog() {
+  const categories = await readCategories();
+  return { categories, services: await readServices(categories) };
+}
+
+async function writeCatalog(categories, services) {
+  if (!firestore || !servicesCollection || !categoriesCollection) throw new Error('Firestore server credentials are not configured.');
+  const [existingServices, existingCategories] = await Promise.all([
+    servicesCollection.get(),
+    categoriesCollection.get()
+  ]);
   const incomingIds = new Set(services.map(service => service.id));
+  const incomingCategoryIds = new Set(categories.map(category => category.id));
   const batch = firestore.batch();
-  for (const document of existing.docs) {
+  for (const document of existingServices.docs) {
     if (!incomingIds.has(document.id)) {
       batch.delete(document.ref);
       batch.delete(webhookConfigsCollection.doc(document.id));
     }
+  }
+  for (const document of existingCategories.docs) {
+    if (!incomingCategoryIds.has(document.id)) batch.delete(document.ref);
+  }
+  for (const category of categories) {
+    batch.set(categoriesCollection.doc(category.id), category, { merge: false });
   }
   for (const service of services) {
     batch.set(servicesCollection.doc(service.id), service, { merge: false });
@@ -507,7 +566,8 @@ app.get('/api/health', async (_req, res) => {
 });
 app.get('/api/services', async (_req, res) => {
   try {
-    res.set('Cache-Control', 'no-store').json({ currency: CURRENCY_CODE, services: await readServices() });
+    const catalog = await readCatalog();
+    res.set('Cache-Control', 'no-store').json({ currency: CURRENCY_CODE, ...catalog });
   } catch (error) {
     console.error('Service read failed:', error.message);
     sendError(res, 503, 'Unable to load services.');
@@ -545,11 +605,12 @@ app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
 });
 
 app.put('/api/services', requireSameOrigin, requireAdmin, async (req, res) => {
-  const services = validateServices(req.body?.services);
-  if (!services) return sendError(res, 400, 'Service data is invalid.');
+  const categories = validateCategories(req.body?.categories);
+  const services = categories && validateServices(req.body?.services, categories);
+  if (!categories || !services) return sendError(res, 400, 'Category or service data is invalid.');
   try {
-    await writeServices(services);
-    res.json({ currency: CURRENCY_CODE, services });
+    await writeCatalog(categories, services);
+    res.json({ currency: CURRENCY_CODE, categories, services });
   } catch (error) {
     console.error('Service save failed:', error.message);
     sendError(res, 500, 'Unable to save services.');
@@ -738,9 +799,12 @@ module.exports.buildEstimate = buildEstimate;
 module.exports.formatCurrency = formatCurrency;
 module.exports.getAnswerFieldKey = getAnswerFieldKey;
 module.exports.normalizeName = normalizeName;
+module.exports.validateCategories = validateCategories;
+module.exports.validateServices = validateServices;
 module.exports.parseFrameAncestors = parseFrameAncestors;
+module.exports.readCategories = readCategories;
+module.exports.readCatalog = readCatalog;
 module.exports.readServices = readServices;
 module.exports.readWebhookStatuses = readWebhookStatuses;
-module.exports.validateServices = validateServices;
 module.exports.validateWebhookUrl = validateWebhookUrl;
-module.exports.writeServices = writeServices;
+module.exports.writeCatalog = writeCatalog;

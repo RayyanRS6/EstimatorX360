@@ -4,6 +4,7 @@
    ------------------------------------------------------------- */
 
 let state = {
+  categories: [],
   services: [],
   adminAuthenticated: false,
   webhook: {
@@ -17,6 +18,7 @@ let state = {
   currentView: "calculator", // 'calculator' | 'builder' | 'webhook' | 'embed'
   calculator: {
     selectedServiceId: null,
+    categoryFilterId: "",
     currentStep: 0, // 0 = select service, 1..N = questions, N+1 = lead form
     answers: {}, // { [questionId]: [optionIndex, ...] }
     lead: {
@@ -38,6 +40,7 @@ const CURRENCY_LOCALE = "en-CA";
 const pageUrl = new URL(window.location.href);
 const isEmbedMode = pageUrl.pathname.replace(/\/$/, '').endsWith('/embed') || pageUrl.searchParams.get('embed') === '1';
 const requestedEmbedServiceId = isEmbedMode ? (pageUrl.searchParams.get('service') || '') : '';
+const requestedEmbedCategoryId = isEmbedMode && !requestedEmbedServiceId ? (pageUrl.searchParams.get('category') || '') : '';
 let embedResizeFrame = null;
 let lastEmbeddedHeight = 0;
 
@@ -140,7 +143,6 @@ function getOptimizedImageUrl(url, width = 600, height = null, crop = 'fill') {
 
     return url.replace('/upload/', `/upload/${transforms.join(',')}/`);
   }
-
 }
 
 // Service configuration is loaded from the protected server API.
@@ -170,6 +172,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 async function loadState() {
+  state.categories = [];
   state.services = [];
   updateSyncStatus("syncing", "Loading...");
   try {
@@ -185,6 +188,7 @@ async function loadState() {
     if (servicesResponse.ok) {
       const data = await servicesResponse.json();
       if (data.currency !== CURRENCY_CODE) throw new Error(`Server pricing currency must be ${CURRENCY_CODE}.`);
+      if (Array.isArray(data.categories) && data.categories.length) state.categories = data.categories;
       if (Array.isArray(data.services) && data.services.length) state.services = data.services;
     }
     if (embedConfigResponse.ok) {
@@ -206,6 +210,9 @@ async function loadState() {
 
   if (state.services.length > 0) {
     state.builder.activeServiceId = state.services[0].id;
+    if (requestedEmbedCategoryId && state.categories.some(category => category.id === requestedEmbedCategoryId)) {
+      state.calculator.categoryFilterId = requestedEmbedCategoryId;
+    }
     const embeddedService = state.services.find(service => service.id === requestedEmbedServiceId);
     if (embeddedService) {
       state.calculator.selectedServiceId = embeddedService.id;
@@ -226,7 +233,7 @@ async function saveServicesState() {
     const response = await fetch("/api/services", {
       method: "PUT",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ services: state.services })
+      body: JSON.stringify({ categories: state.categories, services: state.services })
     });
     if (response.status === 401) {
       state.adminAuthenticated = false;
@@ -235,6 +242,7 @@ async function saveServicesState() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Unable to save services.");
     if (data.currency !== CURRENCY_CODE) throw new Error(`Server pricing currency must be ${CURRENCY_CODE}.`);
+    state.categories = data.categories;
     state.services = data.services;
     updateSyncStatus("live", "Secure Server");
     return true;
@@ -390,6 +398,31 @@ function getSelectedService() {
   return state.services.find(s => s.id === state.calculator.selectedServiceId);
 }
 
+function getCategory(categoryId) {
+  return state.categories.find(category => category.id === categoryId);
+}
+
+function getServiceCategoryNames(service) {
+  return (service?.categoryIds || [])
+    .map(categoryId => getCategory(categoryId)?.name)
+    .filter(Boolean);
+}
+
+function getVisibleCalculatorServices() {
+  const categoryId = requestedEmbedCategoryId || state.calculator.categoryFilterId;
+  if (!categoryId) return state.services;
+  return state.services.filter(service => (service.categoryIds || []).includes(categoryId));
+}
+
+function selectCalculatorCategory(categoryId) {
+  if (requestedEmbedCategoryId) return;
+  state.calculator.categoryFilterId = categoryId;
+  state.calculator.selectedServiceId = null;
+  state.calculator.currentStep = 0;
+  state.calculator.answers = {};
+  renderCalculator();
+}
+
 function calculateEstimate() {
   const service = getSelectedService();
   if (!service) return { minTotal: 0, maxTotal: 0, baseCost: 0, breakdown: [] };
@@ -456,24 +489,40 @@ function renderCalculator() {
     if (progressBarContainer) progressBarContainer.style.display = "none";
     if (progressBar) progressBar.style.width = "0%";
 
+    const visibleServices = getVisibleCalculatorServices();
+    const fixedCategory = requestedEmbedCategoryId ? getCategory(requestedEmbedCategoryId) : null;
     let html = `
-      <div class="section-title">Select Your Renovation Service</div>
-      <div class="section-desc">Choose a service category below to calculate your instant min/max price estimate.</div>
-      <div class="services-grid">
+      <div class="section-title">${fixedCategory ? `${escapeHtml(fixedCategory.name)} Forms` : 'Select Your Renovation Service'}</div>
+      <div class="section-desc">${fixedCategory ? `Choose a ${escapeHtml(fixedCategory.name)} form to calculate your instant min/max price estimate.` : 'Choose a form below to calculate your instant min/max price estimate.'}</div>
     `;
 
-    state.services.forEach(s => {
+    if (!requestedEmbedCategoryId && state.categories.length > 1) {
+      html += `<div class="category-filter-bar">
+        <button class="category-filter-btn ${state.calculator.categoryFilterId ? '' : 'active'}" onclick="selectCalculatorCategory('')">All forms</button>
+        ${state.categories.map(category => `
+          <button class="category-filter-btn ${state.calculator.categoryFilterId === category.id ? 'active' : ''}" onclick="selectCalculatorCategory('${category.id}')">${escapeHtml(category.name)}</button>
+        `).join('')}
+      </div>`;
+    }
+
+    html += `<div class="services-grid">`;
+
+    visibleServices.forEach(s => {
+      const categoryNames = getServiceCategoryNames(s);
       html += `
         <div class="service-card" onclick="selectServiceForCalc('${s.id}')">
           <div class="service-card-icon">${getIconSvg(s.icon || s.id || s.title)}</div>
           <div class="service-card-title">${escapeHtml(s.title)}</div>
+          ${categoryNames.length ? `<div class="service-card-categories">${categoryNames.map(name => `<span>${escapeHtml(name)}</span>`).join('')}</div>` : ''}
           <div class="service-card-base">Base Starting Price: ${formatCurrency(s.baseCost)}</div>
           <button class="btn btn-primary" style="margin-top: 14px; width: 100%;">Select & Estimate →</button>
         </div>
       `;
     });
 
-    html += `</div>`;
+    html += visibleServices.length
+      ? `</div>`
+      : `</div><div class="empty-category-state">No forms are currently assigned to this category.</div>`;
     calcBody.innerHTML = html + getBrandFooterHtml();
     return;
   }
@@ -775,11 +824,34 @@ function renderBuilder() {
     <div class="builder-header">
       <div>
         <h2 class="section-title">EstimatorX360 Form Builder</h2>
-        <p class="section-desc">Add services, configure starting base costs, edit questions, and set Min/Max price ranges.</p>
+        <p class="section-desc">Organize forms into categories, configure starting costs, edit questions, and set Min/Max price ranges.</p>
       </div>
       <div style="display: flex; gap: 10px;">
         <button class="btn btn-primary" onclick="addNewServicePrompt()">${getIconSvg('plus')} Create Service</button>
         <button class="btn btn-secondary" onclick="adminLogout()">Sign Out</button>
+      </div>
+    </div>
+
+    <div class="category-manager-card">
+      <div class="category-manager-heading">
+        <div>
+          <h3>Form Categories</h3>
+          <p>Add or remove categories, then choose which categories each form belongs to.</p>
+        </div>
+        <div class="category-create-row">
+          <input type="text" id="new-category-name" class="form-input" maxlength="120" placeholder="e.g. Commercial" onkeydown="if(event.key === 'Enter'){event.preventDefault();addCategoryFromInput();}" />
+          <button class="btn btn-primary" type="button" onclick="addCategoryFromInput()">${getIconSvg('plus')} Add Category</button>
+        </div>
+      </div>
+      <div class="category-manager-list">
+        ${state.categories.map(category => {
+          const formCount = state.services.filter(service => (service.categoryIds || []).includes(category.id)).length;
+          return `<div class="category-manager-item">
+            <input class="form-input" value="${escapeHtml(category.name)}" aria-label="Category name" onchange="updateCategoryName('${category.id}', this.value)" />
+            <span class="category-form-count">${formCount} ${formCount === 1 ? 'form' : 'forms'}</span>
+            <button class="action-btn-icon category-delete-btn" type="button" onclick="deleteCategory('${category.id}')" title="Delete category" ${state.categories.length === 1 ? 'disabled' : ''}>${getIconSvg('trash')}</button>
+          </div>`;
+        }).join('')}
       </div>
     </div>
 
@@ -831,6 +903,21 @@ function renderBuilder() {
         <div></div>
         <div>
           <button class="btn btn-danger" onclick="deleteService('${activeService.id}')">${getIconSvg('trash')} Delete Service</button>
+        </div>
+      </div>
+
+      <div class="service-category-editor">
+        <div>
+          <h3>Categories for this form</h3>
+          <p>A form may appear in more than one category. Clear every checkbox to keep it available only under “All forms.”</p>
+        </div>
+        <div class="category-checkbox-list">
+          ${state.categories.map(category => `
+            <label class="category-checkbox">
+              <input type="checkbox" ${(activeService.categoryIds || []).includes(category.id) ? 'checked' : ''} onchange="toggleServiceCategory('${activeService.id}', '${category.id}', this.checked)" />
+              <span>${escapeHtml(category.name)}</span>
+            </label>
+          `).join('')}
         </div>
       </div>
 
@@ -937,6 +1024,96 @@ function setActiveBuilderService(serviceId) {
   renderBuilder();
 }
 
+function createStableId(name, existingIds) {
+  const base = String(name || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "category";
+  let candidate = base.slice(0, 70);
+  let suffix = 2;
+  while (existingIds.has(candidate)) {
+    candidate = `${base.slice(0, 65)}-${suffix}`;
+    suffix++;
+  }
+  return candidate;
+}
+
+async function addCategoryFromInput() {
+  const input = document.getElementById("new-category-name");
+  const name = input?.value.trim() || "";
+  if (!name) {
+    showToast("Enter a category name.");
+    input?.focus();
+    return;
+  }
+  if (state.categories.some(category => normalizeName(category.name) === normalizeName(name))) {
+    showToast("A category with this name already exists.");
+    return;
+  }
+  const category = { id: createStableId(name, new Set(state.categories.map(item => item.id))), name };
+  state.categories.push(category);
+  const saved = await saveServicesState();
+  if (!saved) state.categories = state.categories.filter(item => item !== category);
+  renderBuilder();
+  if (saved) showToast("Category added.");
+}
+
+async function updateCategoryName(categoryId, name) {
+  const category = getCategory(categoryId);
+  if (!category) return;
+  const cleanedName = name.trim();
+  if (!cleanedName || state.categories.some(item => item.id !== categoryId && normalizeName(item.name) === normalizeName(cleanedName))) {
+    showToast(cleanedName ? "A category with this name already exists." : "Category name cannot be empty.");
+    renderBuilder();
+    return;
+  }
+  const previousName = category.name;
+  category.name = cleanedName;
+  if (!(await saveServicesState())) category.name = previousName;
+  renderBuilder();
+}
+
+async function deleteCategory(categoryId) {
+  const category = getCategory(categoryId);
+  if (!category || state.categories.length === 1) {
+    showToast("At least one category is required.");
+    return;
+  }
+  const affectedServices = state.services.filter(service => (service.categoryIds || []).includes(categoryId));
+  const warning = affectedServices.length
+    ? `Delete “${category.name}” and remove ${affectedServices.length} ${affectedServices.length === 1 ? 'form' : 'forms'} from it? The forms will not be deleted.`
+    : `Delete the “${category.name}” category?`;
+  if (!window.confirm(warning)) return;
+
+  const previousCategories = state.categories.map(item => ({ ...item }));
+  const previousAssignments = new Map(state.services.map(service => [service.id, [...(service.categoryIds || [])]]));
+  state.categories = state.categories.filter(item => item.id !== categoryId);
+  state.services.forEach(service => {
+    service.categoryIds = (service.categoryIds || []).filter(id => id !== categoryId);
+  });
+  if (!(await saveServicesState())) {
+    state.categories = previousCategories;
+    state.services.forEach(service => { service.categoryIds = previousAssignments.get(service.id) || []; });
+  } else if (state.calculator.categoryFilterId === categoryId) {
+    state.calculator.categoryFilterId = "";
+  }
+  renderBuilder();
+}
+
+async function toggleServiceCategory(serviceId, categoryId, checked) {
+  const service = state.services.find(item => item.id === serviceId);
+  if (!service || !getCategory(categoryId)) return;
+  const previousCategoryIds = [...(service.categoryIds || [])];
+  const nextCategoryIds = new Set(previousCategoryIds);
+  if (checked) nextCategoryIds.add(categoryId);
+  else nextCategoryIds.delete(categoryId);
+  service.categoryIds = [...nextCategoryIds];
+  if (!(await saveServicesState())) service.categoryIds = previousCategoryIds;
+  renderBuilder();
+}
+
 async function updateServiceTitle(serviceId, title) {
   const service = state.services.find(s => s.id === serviceId);
   if (service) {
@@ -977,6 +1154,15 @@ function openCreateServiceModal() {
     form.reset();
     document.getElementById("new-service-basecost").value = "1000";
     document.getElementById("new-service-title")?.setCustomValidity("");
+    const categoryContainer = document.getElementById("new-service-categories");
+    if (categoryContainer) {
+      categoryContainer.innerHTML = state.categories.map((category, index) => `
+        <label class="category-checkbox">
+          <input type="checkbox" value="${escapeHtml(category.id)}" ${category.id === 'residential' || (index === 0 && !state.categories.some(item => item.id === 'residential')) ? 'checked' : ''} />
+          <span>${escapeHtml(category.name)}</span>
+        </label>
+      `).join('');
+    }
     modal.classList.add("active");
     setTimeout(() => {
       initCustomSelects();
@@ -996,6 +1182,7 @@ async function handleCreateServiceSubmit(e) {
   const titleInput = document.getElementById("new-service-title");
   const baseCostInput = document.getElementById("new-service-basecost");
   const iconInput = document.getElementById("new-service-icon");
+  const categoryInputs = document.querySelectorAll("#new-service-categories input[type='checkbox']:checked");
 
   const title = titleInput ? titleInput.value.trim() : "";
   if (!title) return;
@@ -1017,6 +1204,7 @@ async function handleCreateServiceSubmit(e) {
     title: title,
     icon: icon,
     baseCost: baseCost,
+    categoryIds: Array.from(categoryInputs, input => input.value),
     questions: []
   };
   state.services.push(newService);
@@ -1464,14 +1652,16 @@ async function testFormWebhook(serviceId) {
    4. EMBED CODE GENERATOR LOGIC
    ============================================================= */
 
-function getEmbedUrl(serviceId = "") {
+function getEmbedUrl(scope = "all") {
   const embedUrl = new URL("/embed", window.location.origin);
-  if (serviceId) embedUrl.searchParams.set("service", serviceId);
+  const [scopeType, scopeId] = String(scope || "all").split(":");
+  if (scopeType === "service" && scopeId) embedUrl.searchParams.set("service", scopeId);
+  if (scopeType === "category" && scopeId) embedUrl.searchParams.set("category", scopeId);
   return embedUrl.toString();
 }
 
-function buildEmbedCode(serviceId = "") {
-  const embedUrl = getEmbedUrl(serviceId);
+function buildEmbedCode(scope = "all") {
+  const embedUrl = getEmbedUrl(scope);
   return `<iframe
   src="${embedUrl}"
   width="100%"
@@ -1501,26 +1691,38 @@ function renderEmbedGenerator() {
   const container = document.getElementById("embed-container");
   if (!container) return;
 
-  const iframeCode = buildEmbedCode();
+  const iframeCode = buildEmbedCode("all");
   const allowedOrigins = state.embed.allowedParentOrigins.map(origin => escapeHtml(origin)).join(", ");
   const statusText = state.embed.externalEnabled
     ? `External embedding is enabled for: <strong>${allowedOrigins}</strong>`
     : `External embedding is currently locked. Add the exact published webpage origin to <strong>FRAME_ANCESTORS</strong> in the server's private .env file, then restart the server.`;
+  const categoryOptions = state.categories.map(category =>
+    `<option value="category:${escapeHtml(category.id)}">Category: ${escapeHtml(category.name)}</option>`
+  ).join("");
   const serviceOptions = state.services.map(service =>
-    `<option value="${escapeHtml(service.id)}">${escapeHtml(service.title)}</option>`
+    `<option value="service:${escapeHtml(service.id)}">Form: ${escapeHtml(service.title)}</option>`
   ).join("");
 
   let html = `
     <div class="settings-card">
       <h2 class="section-title">Embed Your Estimator</h2>
-      <p class="section-desc">Generate a secure, responsive embed for all forms or open one service directly.</p>
+      <p class="section-desc">Share or embed all forms, one category, or one individual form.</p>
 
       <div class="form-group" style="margin-bottom: 20px;">
-        <label class="form-label" for="embed-service-select">Form to embed</label>
-        <select class="form-select" id="embed-service-select">
-          <option value="">All service forms</option>
-          ${serviceOptions}
+        <label class="form-label" for="embed-scope-select">Forms to share or embed</label>
+        <select class="form-select" id="embed-scope-select">
+          <option value="all">All forms</option>
+          <optgroup label="Categories">${categoryOptions}</optgroup>
+          <optgroup label="Individual forms">${serviceOptions}</optgroup>
         </select>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label class="form-label">Public share link</label>
+        <div class="share-link-row">
+          <input class="form-input" id="share-link-text" value="${escapeHtml(getEmbedUrl('all'))}" readonly />
+          <button class="btn btn-secondary" type="button" onclick="copyShareLink()">${getIconSvg('copy')} Copy Share Link</button>
+        </div>
       </div>
 
       <div class="form-group" style="margin-bottom: 20px;">
@@ -1531,7 +1733,7 @@ function renderEmbedGenerator() {
 
       <div class="embed-preview-wrap">
         <div class="form-label">Live preview</div>
-        <iframe id="embed-preview" class="embed-preview" src="${escapeHtml(getEmbedUrl())}" title="Estimator embed preview" sandbox="allow-forms allow-scripts allow-same-origin" scrolling="no"></iframe>
+        <iframe id="embed-preview" class="embed-preview" src="${escapeHtml(getEmbedUrl('all'))}" title="Estimator embed preview" sandbox="allow-forms allow-scripts allow-same-origin" scrolling="no"></iframe>
       </div>
 
       <div class="info-alert" style="margin-top: 20px;">
@@ -1549,19 +1751,21 @@ function renderEmbedGenerator() {
   `;
 
   container.innerHTML = html;
-  const serviceSelect = document.getElementById("embed-service-select");
-  serviceSelect?.addEventListener("change", () => updateEmbedGenerator(serviceSelect.value));
+  const scopeSelect = document.getElementById("embed-scope-select");
+  scopeSelect?.addEventListener("change", () => updateEmbedGenerator(scopeSelect.value));
   window.removeEventListener("message", handleEmbedPreviewResize);
   window.addEventListener("message", handleEmbedPreviewResize);
 }
 
-function updateEmbedGenerator(serviceId) {
+function updateEmbedGenerator(scope) {
   const codeBlock = document.getElementById("iframe-code-text");
+  const shareLink = document.getElementById("share-link-text");
   const preview = document.getElementById("embed-preview");
-  if (codeBlock) codeBlock.innerText = buildEmbedCode(serviceId);
+  if (codeBlock) codeBlock.innerText = buildEmbedCode(scope);
+  if (shareLink) shareLink.value = getEmbedUrl(scope);
   if (preview) {
     preview.style.height = "760px";
-    preview.src = getEmbedUrl(serviceId);
+    preview.src = getEmbedUrl(scope);
   }
 }
 
@@ -1580,6 +1784,16 @@ async function copyEmbedCode() {
     showToast("Embed code copied to clipboard!");
   } catch {
     showToast("Clipboard access was blocked. Select and copy the code manually.");
+  }
+}
+
+async function copyShareLink() {
+  const link = document.getElementById("share-link-text")?.value || "";
+  try {
+    await navigator.clipboard.writeText(link);
+    showToast("Share link copied to clipboard!");
+  } catch {
+    showToast("Clipboard access was blocked. Select and copy the link manually.");
   }
 }
 
