@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "api/index.js": {
-      "includeFiles": "{public/**,index.html,app.js,styles.css}"
+      "includeFiles": "{public/**,dashboard.html,login.html,app.js,styles.css}"
     }
   },
   "rewrites": [

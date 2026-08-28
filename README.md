@@ -137,7 +137,7 @@ Every form question automatically produces a reference name in the format `Form 
 
 ## 🚀 Running Locally
 
-This application now requires its security server; do not open `index.html` directly or deploy it as a static-only site.
+This application requires its security server; do not expose `dashboard.html` directly or deploy the project as a static-only site.
 
 ```powershell
 npm install

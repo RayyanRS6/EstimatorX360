@@ -29,6 +29,13 @@ test('dashboard routes require an administrator session while embeds remain publ
   assert.equal(dashboardResponse.status, 302);
   assert.equal(dashboardResponse.headers.get('location'), '/login');
 
+  const legacyIndexResponse = await fetch(`${baseUrl}/index.html`, { redirect: 'manual' });
+  assert.equal(legacyIndexResponse.status, 302);
+  assert.equal(legacyIndexResponse.headers.get('location'), '/login');
+
+  const dashboardFileResponse = await fetch(`${baseUrl}/dashboard.html`, { redirect: 'manual' });
+  assert.equal(dashboardFileResponse.status, 404);
+
   const loginPageResponse = await fetch(`${baseUrl}/login`);
   assert.equal(loginPageResponse.status, 200);
   assert.match(await loginPageResponse.text(), /Administrator access/);

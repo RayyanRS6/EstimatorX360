@@ -796,8 +796,8 @@ app.get('/login', (req, res, next) => {
   }
   return sendFrontendFile('login.html', 'no-store')(req, res, next);
 });
-app.get(['/app', '/index.html'], requireAdminPage, sendFrontendFile('index.html', 'no-store'));
-app.get('/embed', sendFrontendFile('index.html', 'no-store', true));
+app.get(['/app', '/index.html'], requireAdminPage, sendFrontendFile('dashboard.html', 'no-store'));
+app.get('/embed', sendFrontendFile('dashboard.html', 'no-store', true));
 app.get('/app.js', sendFrontendFile('app.js', IS_PRODUCTION ? 'public, max-age=3600' : 'no-store', true));
 app.get('/styles.css', sendFrontendFile('styles.css', IS_PRODUCTION ? 'public, max-age=3600' : 'no-store', true));
 
