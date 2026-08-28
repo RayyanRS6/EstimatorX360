@@ -810,9 +810,7 @@ async function adminLogin(event, destination) {
 async function adminLogout() {
   await fetch("/api/admin/logout", { method: "POST" });
   state.adminAuthenticated = false;
-  state.currentView = "calculator";
-  switchView("calculator");
-  showToast("Signed out.");
+  window.location.replace("/login");
 }
 
 function renderBuilder() {

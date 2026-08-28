@@ -4,13 +4,14 @@
 
 - Secrets and integration endpoints are read from the server-only `.env` file, which is excluded by `.gitignore` and cannot be served by the application.
 - Price and form edits require an administrator password and an HTTP-only, SameSite session cookie.
+- The dashboard HTML at `/app` and `/index.html` is server-protected. Unauthenticated root requests are redirected to `/login`; only `/embed` form experiences and their required public data/assets remain available to shared-link visitors.
 - Each form's GHL webhook is stored in a separate server-only Firestore collection, called only by the server, never returned to the browser, and restricted to approved HTTPS LeadConnector hosts with redirects disabled.
 - Estimates are recalculated from server-controlled service data. Client-provided prices, labels, totals, and webhook destinations are not trusted.
 - Image uploads require an administrator session, signed Cloudinary credentials, approved MIME types, valid file signatures, and a 5 MB limit.
 - Service data is read from Firestore, schema-validated, length-limited, and written in an atomic Firestore batch.
 - Login, estimate, and general request rate limits reduce brute-force and abuse risk.
 - Same-origin checks, restrictive security headers, sanitized rendering, generic API errors, and request size limits are enabled.
-- The server exposes only `index.html`, `app.js`, and `styles.css`; `.env`, server code, saved data, and package metadata are not public routes.
+- The server exposes only the login page, protected dashboard HTML, public embed HTML, and the browser assets they require; `.env`, server code, saved data, and package metadata are not public routes.
 
 ## Required one-time account cleanup
 

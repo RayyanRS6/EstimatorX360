@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>Administrator Sign In — EstimatorX360</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="lock-page">
+  <main class="lock-shell">
+    <section class="lock-card" aria-labelledby="lock-title">
+      <div class="lock-brand-mark" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/></svg>
+      </div>
+      <div class="lock-eyebrow">EstimatorX360</div>
+      <h1 id="lock-title">Administrator access</h1>
+      <p class="lock-description">The management dashboard is private. Sign in with the administrator password to continue.</p>
+
+      <form id="lock-login-form" class="lock-form">
+        <div class="form-group">
+          <label class="form-label" for="lock-password">Administrator password</label>
+          <input type="password" id="lock-password" class="form-input" minlength="16" maxlength="256" autocomplete="current-password" required autofocus>
+        </div>
+        <div id="lock-error" class="lock-error" role="alert" aria-live="polite"></div>
+        <button id="lock-submit" class="btn btn-primary lock-submit" type="submit">Sign in securely</button>
+      </form>
+
+      <p class="lock-footnote">Public estimator forms remain available only through their shared form links.</p>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const form = document.getElementById('lock-login-form');
+      const password = document.getElementById('lock-password');
+      const submit = document.getElementById('lock-submit');
+      const error = document.getElementById('lock-error');
+
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        error.textContent = '';
+        submit.disabled = true;
+        submit.textContent = 'Signing in…';
+        try {
+          const response = await fetch('/api/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ password: password.value })
+          });
+          const result = await response.json();
+          password.value = '';
+          if (!response.ok) throw new Error(result.error || 'Sign-in failed.');
+          window.location.replace('/app');
+        } catch (loginError) {
+          error.textContent = loginError.message;
+          password.focus();
+        } finally {
+          submit.disabled = false;
+          submit.textContent = 'Sign in securely';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
