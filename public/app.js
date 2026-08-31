@@ -1275,7 +1275,7 @@ function addQuestionToService(serviceId, position) {
       title: questionTitle,
       type: "single",
       options: [
-        { label: "Option 1", minPrice: 0, maxPrice: 1000 }
+        { label: "Option 1", minPrice: 0, maxPrice: 0 }
       ]
     };
     if (position === 'start') {
@@ -1358,7 +1358,7 @@ function addOptionToQuestion(serviceId, qId) {
   if (service) {
     const q = service.questions.find(item => item.id === qId);
     if (q) {
-      q.options.push({ label: "New Option", minPrice: 0, maxPrice: 500 });
+      q.options.push({ label: "New Option", minPrice: 0, maxPrice: 0 });
       saveServicesState();
       renderBuilder();
     }
