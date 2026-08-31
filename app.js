@@ -921,7 +921,7 @@ function renderBuilder() {
 
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3 style="font-size: 17px; font-weight: 700;">Questions & Min/Max Price Options</h3>
-        <button class="btn btn-secondary" onclick="addQuestionToService('${activeService.id}')">${getIconSvg('plus')} Add Question</button>
+        <button class="btn btn-primary" onclick="addQuestionToService('${activeService.id}', 'start')">${getIconSvg('plus')} Add Question</button>
       </div>
   `;
 
@@ -932,7 +932,7 @@ function renderBuilder() {
         <div class="question-card-header">
           <div style="flex-grow: 1; display: flex; gap: 12px; align-items: center;">
             <span style="font-weight: 800; color: var(--accent-coral);">Q${qIndex + 1}</span>
-            <input type="text" class="form-input" style="flex-grow: 1;" value="${escapeHtml(q.title)}" onchange="updateQuestionTitle('${activeService.id}', '${q.id}', this.value)" placeholder="Enter Question Title..." />
+            <input type="text" class="form-input" data-question-id="${q.id}" style="flex-grow: 1;" value="${escapeHtml(q.title)}" onchange="updateQuestionTitle('${activeService.id}', '${q.id}', this.value)" placeholder="Enter Question Title..." />
             <select class="form-select" style="width: 160px;" onchange="updateQuestionType('${activeService.id}', '${q.id}', this.value)">
               <option value="single" ${q.type === 'single' ? 'selected' : ''}>Single Choice</option>
               <option value="multiple" ${q.type === 'multiple' ? 'selected' : ''}>Multiple Choice</option>
@@ -1003,6 +1003,14 @@ function renderBuilder() {
       </div>
     `;
   });
+
+  if (activeService.questions.length > 0) {
+    html += `
+      <div style="display: flex; justify-content: center; margin-bottom: 22px;">
+        <button class="btn btn-primary" onclick="addQuestionToService('${activeService.id}', 'end')">${getIconSvg('plus')} Add Question</button>
+      </div>
+    `;
+  }
 
   html += `
     <div class="generated-fields-panel generated-fields-panel-end">
@@ -1252,7 +1260,7 @@ async function confirmDeleteService() {
   showToast("Service deleted.");
 }
 
-function addQuestionToService(serviceId) {
+function addQuestionToService(serviceId, position) {
   const service = state.services.find(s => s.id === serviceId);
   if (service) {
     const newQId = "q_" + Date.now();
@@ -1262,16 +1270,27 @@ function addQuestionToService(serviceId) {
       questionNumber++;
       questionTitle = `New Question ${questionNumber}`;
     }
-    service.questions.push({
+    const newQuestion = {
       id: newQId,
       title: questionTitle,
       type: "single",
       options: [
         { label: "Option 1", minPrice: 0, maxPrice: 1000 }
       ]
-    });
+    };
+    if (position === 'start') {
+      service.questions.unshift(newQuestion);
+    } else {
+      service.questions.push(newQuestion);
+    }
     saveServicesState();
     renderBuilder();
+    const titleInput = document.querySelector(`[data-question-id="${newQId}"]`);
+    if (titleInput) {
+      titleInput.focus();
+      titleInput.select();
+      titleInput.scrollIntoView({ block: 'nearest' });
+    }
   }
 }
 
