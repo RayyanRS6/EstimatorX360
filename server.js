@@ -618,6 +618,14 @@ app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
 });
 
 app.put('/api/services', requireSameOrigin, requireAdmin, async (req, res) => {
+  const invalidRange = Array.isArray(req.body?.services) && req.body.services.some(service =>
+    Array.isArray(service?.questions) && service.questions.some(question =>
+      Array.isArray(question?.options) && question.options.some(option =>
+        Number.isFinite(option?.minPrice) && Number.isFinite(option?.maxPrice) && option.minPrice > option.maxPrice
+      )
+    )
+  );
+  if (invalidRange) return sendError(res, 400, 'An option minimum price cannot exceed its maximum price.');
   const categories = validateCategories(req.body?.categories);
   const services = categories && validateServices(req.body?.services, categories);
   if (!categories || !services) return sendError(res, 400, 'Category or service data is invalid.');

@@ -18,3 +18,13 @@ test('share links wrap fully and the bottom sidebar action signs out', () => {
   assert.match(app, /shareLink\.textContent = getEmbedUrl\(scope\)/);
   assert.match(styles, /\.share-link-display[\s\S]*overflow-wrap: anywhere/);
 });
+
+test('option price inputs coordinate valid ranges and catalog saves are serialized', () => {
+  const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+
+  assert.match(app, /data-price-kind="min"/);
+  assert.match(app, /data-price-kind="max"/);
+  assert.match(app, /if \(option\.maxPrice < option\.minPrice\)/);
+  assert.match(app, /if \(option\.minPrice > option\.maxPrice\)/);
+  assert.match(app, /catalogSaveQueue\.then\(performSave, performSave\)/);
+});

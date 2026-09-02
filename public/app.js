@@ -43,6 +43,8 @@ const requestedEmbedServiceId = isEmbedMode ? (pageUrl.searchParams.get('service
 const requestedEmbedCategoryId = isEmbedMode && !requestedEmbedServiceId ? (pageUrl.searchParams.get('category') || '') : '';
 let embedResizeFrame = null;
 let lastEmbeddedHeight = 0;
+let catalogSaveQueue = Promise.resolve();
+let catalogSaveRevision = 0;
 
 // --- CLEAN MINIMAL SVG ICON LIBRARY (NO 3D EMOJIS) ---
 function getIconSvg(name) {
@@ -223,35 +225,48 @@ async function loadState() {
   renderView();
 }
 
-async function saveServicesState() {
+function saveServicesState() {
   if (!state.adminAuthenticated) {
     showToast("Administrator login required.");
-    return false;
+    return Promise.resolve(false);
   }
-  try {
-    updateSyncStatus("syncing", "Saving...");
-    const response = await fetch("/api/services", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ categories: state.categories, services: state.services })
-    });
-    if (response.status === 401) {
-      state.adminAuthenticated = false;
-      throw new Error("Your administrator session expired.");
+  const revision = ++catalogSaveRevision;
+  const requestBody = JSON.stringify({ categories: state.categories, services: state.services });
+
+  const performSave = async () => {
+    try {
+      if (revision === catalogSaveRevision) updateSyncStatus("syncing", "Saving...");
+      const response = await fetch("/api/services", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: requestBody
+      });
+      if (response.status === 401) {
+        state.adminAuthenticated = false;
+        throw new Error("Your administrator session expired.");
+      }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to save services.");
+      if (data.currency !== CURRENCY_CODE) throw new Error(`Server pricing currency must be ${CURRENCY_CODE}.`);
+      if (revision === catalogSaveRevision) {
+        state.categories = data.categories;
+        state.services = data.services;
+        updateSyncStatus("live", "Secure Server");
+      }
+      return true;
+    } catch (error) {
+      console.error("Secure save failed:", error.message);
+      if (revision === catalogSaveRevision) {
+        updateSyncStatus("offline", "Save Failed");
+        showToast(error.message);
+      }
+      return false;
     }
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Unable to save services.");
-    if (data.currency !== CURRENCY_CODE) throw new Error(`Server pricing currency must be ${CURRENCY_CODE}.`);
-    state.categories = data.categories;
-    state.services = data.services;
-    updateSyncStatus("live", "Secure Server");
-    return true;
-  } catch (error) {
-    console.error("Secure save failed:", error.message);
-    updateSyncStatus("offline", "Save Failed");
-    showToast(error.message);
-    return false;
-  }
+  };
+
+  const saveRequest = catalogSaveQueue.then(performSave, performSave);
+  catalogSaveQueue = saveRequest.then(() => undefined, () => undefined);
+  return saveRequest;
 }
 
 // --- CLOUDINARY OPTION IMAGE UPLOAD HANDLER ---
@@ -966,7 +981,7 @@ function renderBuilder() {
           <input type="text" class="form-input" value="${escapeHtml(opt.label)}" onchange="updateOptionLabel('${activeService.id}', '${q.id}', ${optIndex}, this.value)" placeholder="Option Name..." />
           <div class="input-with-prefix">
             <span class="input-prefix">$</span>
-            <input type="number" step="100" class="form-input" value="${opt.minPrice}" placeholder="Min Price" onchange="updateOptionMinPrice('${activeService.id}', '${q.id}', ${optIndex}, this.value)" />
+            <input type="number" min="0" max="100000000" step="100" class="form-input" data-price-kind="min" value="${opt.minPrice}" placeholder="Min Price" onchange="updateOptionMinPrice('${activeService.id}', '${q.id}', ${optIndex}, this.value, this)" />
             <div class="stepper-btn-group">
               <button type="button" class="stepper-btn" onclick="stepPriceInput(this, 100)" title="Increase CAD $100">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
@@ -978,7 +993,7 @@ function renderBuilder() {
           </div>
           <div class="input-with-prefix">
             <span class="input-prefix">$</span>
-            <input type="number" step="100" class="form-input" value="${opt.maxPrice}" placeholder="Max Price" onchange="updateOptionMaxPrice('${activeService.id}', '${q.id}', ${optIndex}, this.value)" />
+            <input type="number" min="0" max="100000000" step="100" class="form-input" data-price-kind="max" value="${opt.maxPrice}" placeholder="Max Price" onchange="updateOptionMaxPrice('${activeService.id}', '${q.id}', ${optIndex}, this.value, this)" />
             <div class="stepper-btn-group">
               <button type="button" class="stepper-btn" onclick="stepPriceInput(this, 100)" title="Increase CAD $100">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
@@ -1388,23 +1403,47 @@ function updateOptionLabel(serviceId, qId, optIndex, val) {
   }
 }
 
-function updateOptionMinPrice(serviceId, qId, optIndex, val) {
+function normalizeOptionPrice(val) {
+  const price = Number.parseFloat(val);
+  if (!Number.isFinite(price)) return 0;
+  return Math.min(100000000, Math.max(0, Math.round(price * 100) / 100));
+}
+
+function updatePairedPriceInput(input, kind, value) {
+  const row = input?.closest(".option-builder-row");
+  const pairedInput = row?.querySelector(`input[data-price-kind="${kind}"]`);
+  if (pairedInput) pairedInput.value = value;
+}
+
+function updateOptionMinPrice(serviceId, qId, optIndex, val, input) {
   const service = state.services.find(s => s.id === serviceId);
   if (service) {
     const q = service.questions.find(item => item.id === qId);
     if (q && q.options[optIndex]) {
-      q.options[optIndex].minPrice = parseFloat(val) || 0;
+      const option = q.options[optIndex];
+      option.minPrice = normalizeOptionPrice(val);
+      if (input) input.value = option.minPrice;
+      if (option.maxPrice < option.minPrice) {
+        option.maxPrice = option.minPrice;
+        updatePairedPriceInput(input, "max", option.maxPrice);
+      }
       saveServicesState();
     }
   }
 }
 
-function updateOptionMaxPrice(serviceId, qId, optIndex, val) {
+function updateOptionMaxPrice(serviceId, qId, optIndex, val, input) {
   const service = state.services.find(s => s.id === serviceId);
   if (service) {
     const q = service.questions.find(item => item.id === qId);
     if (q && q.options[optIndex]) {
-      q.options[optIndex].maxPrice = parseFloat(val) || 0;
+      const option = q.options[optIndex];
+      option.maxPrice = normalizeOptionPrice(val);
+      if (input) input.value = option.maxPrice;
+      if (option.minPrice > option.maxPrice) {
+        option.minPrice = option.maxPrice;
+        updatePairedPriceInput(input, "min", option.minPrice);
+      }
       saveServicesState();
     }
   }

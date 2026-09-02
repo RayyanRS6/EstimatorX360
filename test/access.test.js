@@ -58,4 +58,29 @@ test('dashboard routes require an administrator session while embeds remain publ
   });
   assert.equal(authenticatedDashboardResponse.status, 200);
   assert.match(await authenticatedDashboardResponse.text(), /dashboardApp/);
+
+  const invalidRangeResponse = await fetch(`${baseUrl}/api/services`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Cookie: sessionCookie },
+    body: JSON.stringify({
+      categories: [{ id: 'residential', name: 'Residential' }],
+      services: [{
+        id: 'whole-home',
+        title: 'Whole-home Renovation',
+        icon: 'house',
+        baseCost: 0,
+        categoryIds: ['residential'],
+        questions: [{
+          id: 'q_scope',
+          title: 'What is the scope?',
+          type: 'single',
+          options: [{ label: 'Whole home', minPrice: 70000, maxPrice: 20000 }]
+        }]
+      }]
+    })
+  });
+  assert.equal(invalidRangeResponse.status, 400);
+  assert.deepEqual(await invalidRangeResponse.json(), {
+    error: 'An option minimum price cannot exceed its maximum price.'
+  });
 });
