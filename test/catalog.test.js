@@ -5,7 +5,12 @@ const assert = require('node:assert/strict');
 
 process.env.ADMIN_PASSWORD = 'test-admin-password-12345';
 process.env.SESSION_SECRET = 'test-session-secret-with-at-least-32-characters';
+process.env.KILL_SWITCH_PASSWORD = 'test-kill-switch-password-6789';
 process.env.FIREBASE_PROJECT_ID = 'priceguide-test';
+process.env.FIREBASE_CLIENT_EMAIL = '';
+process.env.FIREBASE_PRIVATE_KEY = '';
+process.env.FIREBASE_USE_ADC = 'false';
+delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
 const { validateCategories, validateServices } = require('../server.js');
 

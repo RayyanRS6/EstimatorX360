@@ -15,7 +15,14 @@ let state = {
     allowedParentOrigins: [],
     externalEnabled: false
   },
-  currentView: "calculator", // 'calculator' | 'builder' | 'webhook' | 'embed'
+  killSwitch: {
+    active: true,
+    message: "",
+    updatedAt: "",
+    unlocked: false,
+    loaded: false
+  },
+  currentView: "calculator", // 'calculator' | 'builder' | 'webhook' | 'embed' | 'kill-switch'
   calculator: {
     selectedServiceId: null,
     categoryFilterId: "",
@@ -96,6 +103,11 @@ function getIconSvg(name) {
     case 'embed':
     case 'code':
       return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
+    case 'kill-switch':
+    case 'power':
+      return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`;
+    case 'lock':
+      return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
     case 'search':
       return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
     case 'bell':
@@ -203,6 +215,9 @@ async function loadState() {
     if (sessionResponse?.ok) {
       const session = await sessionResponse.json();
       state.adminAuthenticated = Boolean(session.authenticated);
+      state.killSwitch.active = session.estimatorActive !== false;
+      state.killSwitch.unlocked = Boolean(session.killSwitchUnlocked);
+      state.killSwitch.loaded = true;
     }
     updateSyncStatus("live", "Secure Server");
   } catch (error) {
@@ -222,7 +237,29 @@ async function loadState() {
     }
   }
 
+  renderKillSwitchBanner();
   renderView();
+}
+
+/**
+ * Persistent reminder shown across every dashboard tab (never in embed mode) while the
+ * public estimator is paused, so an administrator can't forget to turn it back on after
+ * a customer pays.
+ */
+function renderKillSwitchBanner() {
+  const banner = document.getElementById("global-kill-switch-banner");
+  if (!banner) return;
+  if (!state.killSwitch.loaded || state.killSwitch.active) {
+    banner.hidden = true;
+    banner.innerHTML = "";
+    return;
+  }
+  banner.hidden = false;
+  banner.innerHTML = `
+    ${getIconSvg('info')}
+    <span>The public estimator is currently <strong>paused</strong> — every <code>/embed</code> link is showing a temporary unavailable notice.</span>
+    <button type="button" class="btn btn-secondary kill-switch-banner-btn" onclick="switchView('kill-switch')">Manage</button>
+  `;
 }
 
 function saveServicesState() {
@@ -401,6 +438,8 @@ function renderView() {
     renderWebhookSettings();
   } else if (state.currentView === "embed") {
     renderEmbedGenerator();
+  } else if (state.currentView === "kill-switch") {
+    renderKillSwitchSettings();
   }
   setTimeout(initCustomSelects, 10);
 }
@@ -816,6 +855,7 @@ async function adminLogin(event, destination) {
     state.adminAuthenticated = true;
     showToast("Administrator access granted.");
     if (destination === "webhook") renderWebhookSettings();
+    else if (destination === "kill-switch") renderKillSwitchSettings();
     else renderBuilder();
   } catch (error) {
     showToast(error.message);
@@ -1853,6 +1893,275 @@ async function copyShareLink() {
     showToast("Share link copied to clipboard!");
   } catch {
     showToast("Clipboard access was blocked. Select and copy the link manually.");
+  }
+}
+
+/* =============================================================
+   5. KILL SWITCH (BILLING CONTROL) LOGIC
+   Two independent locks stand between anyone and this section:
+   the administrator session, and this section's own separate
+   password. Signing in as administrator is not enough by itself.
+   ============================================================= */
+
+async function handleKillSwitchAuthError(response, result, unlocking = false) {
+  let code = result.code;
+  // Older deployments used 401 for both locks. Confirm the admin session before
+  // replacing the panel with a login form; a section lock must not sign the user out.
+  if (response.status === 401 && !code) {
+    const sessionResponse = await fetch("/api/admin/session", {
+      credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }
+    });
+    if (!sessionResponse.ok) throw new Error("Unable to verify your session. Please try again.");
+    const session = await sessionResponse.json();
+    if (session.authenticated === false) code = "ADMIN_AUTH_REQUIRED";
+    else if (session.authenticated === true) code = unlocking ? "KILL_SWITCH_PASSWORD_INVALID" : "KILL_SWITCH_LOCKED";
+    else throw new Error("Unable to verify your session. Please try again.");
+  }
+  if (response.status === 403 && !code && result.error === "Kill switch password required.") {
+    code = "KILL_SWITCH_LOCKED";
+  }
+  if (code === "ADMIN_AUTH_REQUIRED") {
+    state.adminAuthenticated = false;
+    state.killSwitch.unlocked = false;
+    renderAdminGate(document.getElementById("kill-switch-container"), "kill-switch");
+    showToast("Your administrator session expired. Sign in again.");
+    return true;
+  }
+  if (code === "KILL_SWITCH_LOCKED") {
+    state.killSwitch.unlocked = false;
+    renderKillSwitchGate();
+    showToast("Enter the kill switch password to continue.");
+    return true;
+  }
+  return false;
+}
+
+async function renderKillSwitchSettings() {
+  const container = document.getElementById("kill-switch-container");
+  if (!container) return;
+  if (!state.adminAuthenticated) return renderAdminGate(container, "kill-switch");
+
+  container.innerHTML = `<div class="settings-card"><p class="section-desc">Loading kill switch status...</p></div>`;
+  try {
+    const response = await fetch("/api/admin/kill-switch", { headers: { Accept: "application/json" } });
+    const result = await response.json();
+    if (await handleKillSwitchAuthError(response, result)) return;
+    if (!response.ok) throw new Error(result.error || "Unable to load kill switch status.");
+    state.killSwitch.active = result.active !== false;
+    state.killSwitch.message = result.message || "";
+    state.killSwitch.updatedAt = result.updatedAt || "";
+    state.killSwitch.unlocked = true;
+    state.killSwitch.loaded = true;
+    renderKillSwitchBanner();
+    renderKillSwitchPanel(container);
+  } catch (error) {
+    container.innerHTML = `
+      <div class="settings-card">
+        <div class="info-alert">
+          <div>${getIconSvg('info')}</div>
+          <div>${escapeHtml(error.message)}</div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function renderKillSwitchGate(container = document.getElementById("kill-switch-container")) {
+  if (!container) return;
+  container.innerHTML = `
+    <div class="settings-card kill-switch-gate">
+      <div class="kill-switch-gate-icon">${getIconSvg('lock')}</div>
+      <h2 class="section-title">Kill Switch — Billing Control</h2>
+      <p class="section-desc">This section is locked separately from your administrator login. Enter the kill switch password to view and change whether the public estimator is live.</p>
+      <form class="kill-switch-gate-form" onsubmit="unlockKillSwitch(event)">
+        <div class="form-group">
+          <label class="form-label" for="kill-switch-password-input">Kill Switch Password</label>
+          <input type="password" class="form-input" id="kill-switch-password-input" minlength="16" maxlength="256" autocomplete="off" required />
+        </div>
+        <button class="btn btn-primary kill-switch-gate-submit" type="submit">${getIconSvg('lock')} Unlock Section</button>
+      </form>
+      <p class="kill-switch-gate-note">The section locks itself again after 20 minutes, and whenever you sign out.</p>
+    </div>
+  `;
+  setTimeout(() => document.getElementById("kill-switch-password-input")?.focus(), 40);
+}
+
+function renderKillSwitchPanel(container = document.getElementById("kill-switch-container")) {
+  if (!container) return;
+  if (!state.killSwitch.unlocked) return renderKillSwitchGate(container);
+
+  const isActive = state.killSwitch.active;
+  const updatedLabel = formatKillSwitchTimestamp(state.killSwitch.updatedAt);
+
+  container.innerHTML = `
+    <div class="settings-card">
+      <div class="builder-header kill-switch-header">
+        <div class="kill-switch-header-text">
+          <h2 class="section-title">Kill Switch — Billing Control</h2>
+          <p class="section-desc">Pause every EstimatorX360 embed at once — the main <code>/embed</code> page and every category or single-form link built from it — then resume them the moment an account is settled.</p>
+        </div>
+        <button class="btn btn-secondary" type="button" onclick="lockKillSwitchSection()">${getIconSvg('lock')} Lock Section</button>
+      </div>
+
+      <div class="kill-switch-status-card ${isActive ? 'is-active' : 'is-paused'}">
+        <div class="kill-switch-status-info">
+          <span class="kill-switch-status-dot"></span>
+          <div class="kill-switch-status-text">
+            <h3>${isActive ? 'Estimator is live' : 'Estimator is paused'}</h3>
+            <p>${isActive
+              ? 'Every embed link is loading the calculator normally.'
+              : 'Every embed link is showing your unavailable notice instead of the calculator.'}</p>
+            ${updatedLabel ? `<span class="kill-switch-status-meta">Last changed ${escapeHtml(updatedLabel)}</span>` : ''}
+          </div>
+        </div>
+        <button class="btn ${isActive ? 'btn-danger' : 'btn-primary'} kill-switch-toggle-btn" type="button" onclick="confirmKillSwitchToggle(${isActive ? 'false' : 'true'})">
+          ${getIconSvg('power')} ${isActive ? 'Turn Estimator OFF' : 'Turn Estimator ON'}
+        </button>
+      </div>
+
+      <div class="kill-switch-block">
+        <h3 class="kill-switch-block-title">Message shown to visitors while paused</h3>
+        <p class="generated-fields-help">Displayed on every <code>/embed</code> link in place of the calculator. Leave it blank to use the default notice.</p>
+        <div class="form-group kill-switch-message-field">
+          <textarea class="form-textarea" id="kill-switch-message-input" rows="3" maxlength="400" placeholder="This estimator is temporarily unavailable. Please check back soon or contact us directly.">${escapeHtml(state.killSwitch.message)}</textarea>
+        </div>
+        <div class="kill-switch-block-actions">
+          <button class="btn btn-secondary" type="button" onclick="saveKillSwitchMessage()">Save Message</button>
+        </div>
+      </div>
+
+      <div class="info-alert kill-switch-note">
+        <div>${getIconSvg('info')}</div>
+        <div>While paused, estimate submissions are refused by the server as well, so nothing reaches GoHighLevel. You stay signed in, so you can still edit forms and preview the calculator yourself.</div>
+      </div>
+    </div>
+  `;
+}
+
+function formatKillSwitchTimestamp(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString(CURRENCY_LOCALE, {
+    year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit"
+  });
+}
+
+async function unlockKillSwitch(event) {
+  event.preventDefault();
+  const input = document.getElementById("kill-switch-password-input");
+  try {
+    const response = await fetch("/api/admin/kill-switch/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ password: input.value })
+    });
+    const result = await response.json();
+    if (input) input.value = "";
+    if (await handleKillSwitchAuthError(response, result, true)) return;
+    if (!response.ok) throw new Error(result.error || "Incorrect kill switch password.");
+    state.killSwitch.unlocked = true;
+    showToast("Kill switch section unlocked.");
+    // Re-read from the server rather than trusting this flag: the panel's contents come
+    // back only if the server accepts the unlock cookie it just issued.
+    await renderKillSwitchSettings();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function lockKillSwitchSection() {
+  try {
+    await fetch("/api/admin/kill-switch/lock", { method: "POST" });
+  } catch (error) {
+    console.error("Kill switch lock failed:", error.message);
+  }
+  state.killSwitch.unlocked = false;
+  state.killSwitch.message = "";
+  state.killSwitch.updatedAt = "";
+  showToast("Kill switch section locked.");
+  renderKillSwitchGate();
+}
+
+let pendingKillSwitchConfirm = null;
+
+function openKillSwitchConfirm({ heading, body, confirmLabel, danger, onConfirm }) {
+  const modal = document.getElementById("kill-switch-confirm-modal");
+  const headingElement = document.getElementById("kill-switch-confirm-heading");
+  const iconElement = document.getElementById("kill-switch-confirm-icon");
+  const bodyElement = document.getElementById("kill-switch-confirm-body");
+  const acceptButton = document.getElementById("kill-switch-confirm-accept");
+  if (!modal || !headingElement || !bodyElement || !acceptButton) {
+    // The modal markup is missing; never silently perform a destructive action instead.
+    showToast("Confirmation dialog is unavailable. Reload the dashboard and try again.");
+    return;
+  }
+
+  pendingKillSwitchConfirm = onConfirm;
+  headingElement.textContent = heading;
+  bodyElement.textContent = body;
+  acceptButton.textContent = confirmLabel;
+  acceptButton.className = `btn ${danger ? "btn-danger" : "btn-primary"}`;
+  if (iconElement) iconElement.innerHTML = getIconSvg("power");
+  iconElement?.classList.toggle("is-danger", Boolean(danger));
+  modal.classList.add("active");
+  setTimeout(() => acceptButton.focus(), 40);
+}
+
+function closeKillSwitchConfirm() {
+  pendingKillSwitchConfirm = null;
+  document.getElementById("kill-switch-confirm-modal")?.classList.remove("active");
+}
+
+function acceptKillSwitchConfirm() {
+  const action = pendingKillSwitchConfirm;
+  closeKillSwitchConfirm();
+  if (typeof action === "function") action();
+}
+
+function confirmKillSwitchToggle(active) {
+  openKillSwitchConfirm({
+    heading: active ? "Turn the estimator back on?" : "Turn the estimator off?",
+    body: active
+      ? "Every embed link starts working again immediately — the main embed page and every category or single-form link."
+      : "Every embed link — the main embed page and every category or single-form link — will immediately show your unavailable notice instead of the calculator, and estimate submissions will stop, until you turn it back on.",
+    confirmLabel: active ? "Turn Estimator ON" : "Turn Estimator OFF",
+    danger: !active,
+    onConfirm: () => setKillSwitchActive(active)
+  });
+}
+
+async function setKillSwitchActive(active) {
+  const messageInput = document.getElementById("kill-switch-message-input");
+  const message = messageInput ? messageInput.value : state.killSwitch.message;
+  await pushKillSwitchUpdate(active, message, active ? "Estimator turned ON. Embeds are live again." : "Estimator turned OFF. Embeds now show the unavailable notice.");
+}
+
+async function saveKillSwitchMessage() {
+  const messageInput = document.getElementById("kill-switch-message-input");
+  const message = messageInput ? messageInput.value : "";
+  await pushKillSwitchUpdate(state.killSwitch.active, message, "Message saved.");
+}
+
+async function pushKillSwitchUpdate(active, message, successText) {
+  try {
+    const response = await fetch("/api/admin/kill-switch", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ active, message })
+    });
+    const result = await response.json();
+    if (await handleKillSwitchAuthError(response, result)) return;
+    if (!response.ok) throw new Error(result.error || "Unable to update the kill switch.");
+    state.killSwitch.active = result.active !== false;
+    state.killSwitch.message = result.message || "";
+    state.killSwitch.updatedAt = result.updatedAt || "";
+    state.killSwitch.loaded = true;
+    showToast(successText);
+    renderKillSwitchBanner();
+    renderKillSwitchPanel();
+  } catch (error) {
+    showToast(error.message);
   }
 }
 

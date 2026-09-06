@@ -641,6 +641,222 @@ body.dark-theme .nav-util-btn:hover {
   line-height: 1.5;
 }
 
+/* --- GLOBAL KILL SWITCH BANNER --- */
+/* This class sets display:flex, which would otherwise beat the browser's built-in
+   [hidden] { display: none } rule and leave an empty coloured bar on every page.
+   This rule must stay for the banner to disappear when the estimator is active. */
+.kill-switch-banner[hidden] {
+  display: none;
+}
+
+.kill-switch-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  color: var(--text-dark);
+  border-radius: 16px;
+  padding: 14px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 4px 0 20px;
+}
+
+.kill-switch-banner svg {
+  flex-shrink: 0;
+  color: #EF4444;
+}
+
+.kill-switch-banner span {
+  flex: 1;
+  min-width: 200px;
+}
+
+.kill-switch-banner-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+/* --- KILL SWITCH PASSWORD GATE --- */
+.kill-switch-gate {
+  max-width: 560px;
+  margin: 40px auto 28px;
+  text-align: center;
+}
+
+.kill-switch-gate-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 20px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-coral-light);
+  color: var(--accent-coral);
+}
+
+.kill-switch-gate .section-desc {
+  margin: 10px auto 26px;
+  max-width: 420px;
+}
+
+.kill-switch-gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-items: stretch;
+  text-align: left;
+}
+
+.kill-switch-gate-submit {
+  justify-content: center;
+  width: 100%;
+}
+
+.kill-switch-gate-note {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-light);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* --- KILL SWITCH PANEL HEADER --- */
+.kill-switch-header {
+  align-items: flex-start;
+  margin-bottom: 26px;
+}
+
+.kill-switch-header-text {
+  flex: 1;
+  min-width: 320px;
+}
+
+.kill-switch-header-text .section-desc {
+  margin-top: 8px;
+  max-width: 760px;
+}
+
+/* --- KILL SWITCH STATUS CARD --- */
+.kill-switch-status-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 24px 26px;
+  margin-bottom: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  background: rgba(16, 185, 129, 0.06);
+  border-color: rgba(16, 185, 129, 0.24);
+}
+
+.kill-switch-status-card.is-paused {
+  background: rgba(239, 68, 68, 0.07);
+  border-color: rgba(239, 68, 68, 0.26);
+}
+
+.kill-switch-status-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 260px;
+  flex: 1;
+}
+
+.kill-switch-status-dot {
+  width: 12px;
+  height: 12px;
+  margin-top: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #10B981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18);
+}
+
+.kill-switch-status-card.is-paused .kill-switch-status-dot {
+  background: #EF4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18);
+}
+
+.kill-switch-status-text h3 {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.kill-switch-status-text p {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.kill-switch-status-meta {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--text-light);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kill-switch-toggle-btn {
+  flex-shrink: 0;
+}
+
+/* --- KILL SWITCH MESSAGE BLOCK --- */
+.kill-switch-block {
+  padding-top: 26px;
+  margin-bottom: 26px;
+  border-top: 1px solid var(--border-color);
+}
+
+.kill-switch-block-title {
+  font-size: 16px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.kill-switch-message-field {
+  margin: 16px 0 18px;
+}
+
+.kill-switch-block-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.kill-switch-note {
+  margin-bottom: 0;
+}
+
+.kill-switch-confirm-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--accent-coral-light);
+  color: var(--accent-coral);
+}
+
+.kill-switch-confirm-icon.is-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #EF4444;
+}
+
+.kill-switch-confirm-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
 /* --- VIEW SECTIONS --- */
 .view-section {
   display: none;

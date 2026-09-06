@@ -12,6 +12,9 @@
 - Login, estimate, and general request rate limits reduce brute-force and abuse risk.
 - Same-origin checks, restrictive security headers, sanitized rendering, generic API errors, and request size limits are enabled.
 - The server exposes only the login page, protected dashboard HTML, public embed HTML, and the browser assets they require; `.env`, server code, saved data, and package metadata are not public routes.
+- The Kill Switch (billing control) requires two independent checks before it can be read or changed: the administrator session cookie, and a second, separately-signed cookie issued only after `KILL_SWITCH_PASSWORD` is entered (rate-limited like login, and expiring after 20 minutes). The two cookies are HMAC-signed with distinct embedded scopes, so an admin session token cannot be replayed under the kill switch's cookie name to bypass its password. Reading the section returns 403 without that second cookie, so a tampered-with frontend that forces the panel open still receives no pause state and no visitor-facing message; every mutation is refused the same way. Signing out clears the unlock cookie as well, so the next person to sign in on the same browser does not inherit an unlocked section.
+- When the estimator is paused, unauthenticated requests to `/embed` (and every category/service link derived from it), `GET /api/services`, and `POST /api/estimate` are blocked at the server, independent of any client-side rendering — a visitor cannot restore the calculator by disabling JavaScript checks. A signed-in administrator is exempt from these blocks so forms can still be reviewed and tested while paused.
+- If Firestore cannot be reached, public access fails **closed** until the saved status can be verified, so a database outage cannot reopen a paused estimator. A missing status document defaults to live on first setup.
 
 ## Required one-time account cleanup
 

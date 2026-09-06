@@ -17,11 +17,19 @@ const SESSION_SECRET = process.env.SESSION_SECRET || '';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const SESSION_TOKEN_VERSION = 1;
 const COOKIE_NAME = IS_PRODUCTION ? '__Host-priceguide_admin' : 'priceguide_admin';
+// The kill switch is a second, independent lock: an administrator must already be signed in
+// AND must separately unlock this section with its own password before it can be changed.
+const KILL_SWITCH_PASSWORD = process.env.KILL_SWITCH_PASSWORD || '';
+const KILL_SWITCH_COOKIE_NAME = IS_PRODUCTION ? '__Host-priceguide_killswitch' : 'priceguide_killswitch';
+const KILL_SWITCH_TTL_SECONDS = 20 * 60;
+const KILL_SWITCH_DOC_ID = 'status';
+const DEFAULT_KILL_SWITCH_MESSAGE = 'This estimator is temporarily unavailable. Please check back soon or contact us directly.';
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || '';
 const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || '(default)';
 const FIRESTORE_SERVICES_COLLECTION = process.env.FIRESTORE_SERVICES_COLLECTION || 'services';
 const FIRESTORE_CATEGORIES_COLLECTION = process.env.FIRESTORE_CATEGORIES_COLLECTION || 'categories';
 const FIRESTORE_WEBHOOK_CONFIGS_COLLECTION = process.env.FIRESTORE_WEBHOOK_CONFIGS_COLLECTION || 'webhook_configs';
+const FIRESTORE_KILL_SWITCH_COLLECTION = process.env.FIRESTORE_KILL_SWITCH_COLLECTION || 'kill_switch';
 const CURRENCY_CODE = 'CAD';
 const CURRENCY_LOCALE = 'en-CA';
 const DEFAULT_CATEGORY = Object.freeze({ id: 'residential', name: 'Residential' });
@@ -31,6 +39,12 @@ if (ADMIN_PASSWORD.length < 16) {
 }
 if (SESSION_SECRET.length < 32) {
   throw new Error('SESSION_SECRET must be at least 32 characters. Set it in .env.');
+}
+if (KILL_SWITCH_PASSWORD.length < 16) {
+  throw new Error('KILL_SWITCH_PASSWORD must be at least 16 characters. Set it in .env.');
+}
+if (KILL_SWITCH_PASSWORD === ADMIN_PASSWORD) {
+  throw new Error('KILL_SWITCH_PASSWORD must be different from ADMIN_PASSWORD.');
 }
 if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
   throw new Error('PORT must be a valid TCP port.');
@@ -47,7 +61,10 @@ if (!/^[a-zA-Z0-9_-]{1,80}$/.test(FIRESTORE_CATEGORIES_COLLECTION)) {
 if (!/^[a-zA-Z0-9_-]{1,80}$/.test(FIRESTORE_WEBHOOK_CONFIGS_COLLECTION)) {
   throw new Error('FIRESTORE_WEBHOOK_CONFIGS_COLLECTION is invalid.');
 }
-if (new Set([FIRESTORE_SERVICES_COLLECTION, FIRESTORE_CATEGORIES_COLLECTION, FIRESTORE_WEBHOOK_CONFIGS_COLLECTION]).size !== 3) {
+if (!/^[a-zA-Z0-9_-]{1,80}$/.test(FIRESTORE_KILL_SWITCH_COLLECTION)) {
+  throw new Error('FIRESTORE_KILL_SWITCH_COLLECTION is invalid.');
+}
+if (new Set([FIRESTORE_SERVICES_COLLECTION, FIRESTORE_CATEGORIES_COLLECTION, FIRESTORE_WEBHOOK_CONFIGS_COLLECTION, FIRESTORE_KILL_SWITCH_COLLECTION]).size !== 4) {
   throw new Error('Firestore collection names must be unique.');
 }
 
@@ -58,6 +75,7 @@ let firestore = null;
 let servicesCollection = null;
 let categoriesCollection = null;
 let webhookConfigsCollection = null;
+let killSwitchCollection = null;
 if (firebaseClientEmail || firebasePrivateKey || useApplicationDefaultCredentials) {
   if (!firebaseClientEmail || !firebasePrivateKey) {
     if (!useApplicationDefaultCredentials) {
@@ -78,6 +96,7 @@ if (firebaseClientEmail || firebasePrivateKey || useApplicationDefaultCredential
   servicesCollection = firestore.collection(FIRESTORE_SERVICES_COLLECTION);
   categoriesCollection = firestore.collection(FIRESTORE_CATEGORIES_COLLECTION);
   webhookConfigsCollection = firestore.collection(FIRESTORE_WEBHOOK_CONFIGS_COLLECTION);
+  killSwitchCollection = firestore.collection(FIRESTORE_KILL_SWITCH_COLLECTION);
 }
 
 const app = express();
@@ -202,8 +221,8 @@ const estimateLimiter = rateLimit({
   message: { error: 'Too many submissions. Try again later.' }
 });
 
-function sendError(res, status, message) {
-  return res.status(status).json({ error: message });
+function sendError(res, status, message, code) {
+  return res.status(status).json({ error: message, ...(code ? { code } : {}) });
 }
 
 function parseCookies(header = '') {
@@ -224,33 +243,43 @@ function sign(value) {
   return crypto.createHmac('sha256', SESSION_SECRET).update(value).digest('base64url');
 }
 
-function createSessionToken() {
+function createSessionToken(scope = 'admin', ttlSeconds = SESSION_TTL_SECONDS) {
   const payload = Buffer.from(JSON.stringify({
     v: SESSION_TOKEN_VERSION,
-    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+    scope,
+    exp: Math.floor(Date.now() / 1000) + ttlSeconds,
     nonce: crypto.randomBytes(18).toString('base64url')
   })).toString('base64url');
   return `${payload}.${sign(payload)}`;
 }
 
-function verifySessionToken(token) {
+// `scope` keeps the administrator session and the kill switch unlock cryptographically
+// distinct, even though both are HMAC-signed with the same SESSION_SECRET: copying an
+// admin session cookie's value into the kill switch cookie (or vice versa) will not
+// verify, because the signed payload itself records which purpose it was issued for.
+function verifySessionToken(token, expectedScope = 'admin') {
   if (!token || typeof token !== 'string') return false;
   const [payload, signature, extra] = token.split('.');
   if (!payload || !signature || extra || !safeEqual(signature, sign(payload))) return false;
   try {
     const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return decoded.v === SESSION_TOKEN_VERSION && Number.isInteger(decoded.exp) && decoded.exp > Math.floor(Date.now() / 1000);
+    return decoded.v === SESSION_TOKEN_VERSION && decoded.scope === expectedScope &&
+      Number.isInteger(decoded.exp) && decoded.exp > Math.floor(Date.now() / 1000);
   } catch {
     return false;
   }
 }
 
 function isAdminAuthenticated(req) {
-  return verifySessionToken(parseCookies(req.headers.cookie)[COOKIE_NAME]);
+  return verifySessionToken(parseCookies(req.headers.cookie)[COOKIE_NAME], 'admin');
+}
+
+function isKillSwitchUnlocked(req) {
+  return verifySessionToken(parseCookies(req.headers.cookie)[KILL_SWITCH_COOKIE_NAME], 'kill-switch');
 }
 
 function requireAdmin(req, res, next) {
-  if (!isAdminAuthenticated(req)) return sendError(res, 401, 'Administrator authentication required.');
+  if (!isAdminAuthenticated(req)) return sendError(res, 401, 'Administrator authentication required.', 'ADMIN_AUTH_REQUIRED');
   next();
 }
 
@@ -260,6 +289,22 @@ function requireAdminPage(req, res, next) {
     return res.redirect(302, '/login');
   }
   next();
+}
+
+// Applied in addition to requireAdmin: being signed in as administrator is not enough
+// to flip the kill switch. The separate kill switch password must also have been entered
+// recently (see /api/admin/kill-switch/unlock) so a shared or unattended admin session
+// cannot pause or resume billing enforcement by itself.
+// 403 (not 401) is deliberate: 401 means "no administrator session", 403 means "signed in
+// as administrator, but this section's own password has not been entered". The dashboard
+// relies on that distinction to show the right gate, and it keeps the two locks separate.
+function requireKillSwitchUnlock(req, res, next) {
+  if (!isKillSwitchUnlocked(req)) return sendError(res, 403, 'Kill switch password required.', 'KILL_SWITCH_LOCKED');
+  next();
+}
+
+function clearKillSwitchUnlock(res) {
+  res.clearCookie(KILL_SWITCH_COOKIE_NAME, { httpOnly: true, secure: IS_PRODUCTION, sameSite: 'strict', path: '/' });
 }
 
 function requireSameOrigin(req, res, next) {
@@ -443,6 +488,132 @@ async function writeCatalog(categories, services) {
   await batch.commit();
 }
 
+function validateKillSwitchMessage(value) {
+  if (value === undefined) return '';
+  return cleanString(value, 400);
+}
+
+// A missing status document defaults to active. A failed read must never reopen a
+// paused estimator; public callers stay unavailable until the status can be verified.
+async function readKillSwitchStatus() {
+  if (!killSwitchCollection) throw new Error('Firestore server credentials are not configured.');
+  const document = await killSwitchCollection.doc(KILL_SWITCH_DOC_ID).get();
+  if (!document.exists) return { active: true, message: '', updatedAt: '' };
+  const data = document.data() || {};
+  return {
+    active: data.active !== false,
+    message: validateKillSwitchMessage(data.message) || '',
+    updatedAt: cleanString(data.updatedAt, 40) || ''
+  };
+}
+
+async function writeKillSwitchStatus(active, message) {
+  if (!killSwitchCollection) throw new Error('Firestore server credentials are not configured.');
+  const status = { active: Boolean(active), message: message || '', updatedAt: new Date().toISOString() };
+  await killSwitchCollection.doc(KILL_SWITCH_DOC_ID).set(status, { merge: false });
+  return status;
+}
+
+async function readKillSwitchStatusSafe(context) {
+  try {
+    return await readKillSwitchStatus();
+  } catch (error) {
+    console.error(`Kill switch status read failed (${context}):`, error.message);
+    return { active: false, message: '', updatedAt: '' };
+  }
+}
+
+function escapeHtmlServer(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+}
+
+// Rendered directly by the /embed route (without loading dashboard.html/app.js at all)
+// whenever the estimator is switched off for a public, unauthenticated visitor. It ships
+// the same resize postMessage contract as the real embed so an iframe already pasted on
+// the customer's site resizes cleanly to this notice instead of showing empty space.
+function renderKillSwitchPage(message) {
+  const safeMessage = escapeHtmlServer(message || DEFAULT_KILL_SWITCH_MESSAGE);
+  return `<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estimator Unavailable</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #F4F5F8;
+    color: #121316;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 260px;
+    padding: 32px 24px;
+  }
+  .notice {
+    max-width: 560px;
+    width: 100%;
+    background: #FFFFFF;
+    border: 1px solid #EEF0F4;
+    border-radius: 22px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+    padding: 32px;
+    text-align: center;
+  }
+  .notice-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 16px;
+    border-radius: 14px;
+    background: rgba(250, 88, 56, 0.1);
+    color: #FA5838;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .notice h1 {
+    font-size: 18px;
+    font-weight: 800;
+    margin: 0 0 10px;
+  }
+  .notice p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #6B7280;
+    margin: 0;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+  <div class="notice">
+    <div class="notice-icon">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <h1>Estimator Temporarily Unavailable</h1>
+    <p>${safeMessage}</p>
+  </div>
+  <script>
+    (function () {
+      function sendHeight() {
+        var height = Math.ceil(document.body.getBoundingClientRect().height);
+        if (Number.isFinite(height)) {
+          window.parent.postMessage({ type: "automatex360:resize", height: height }, "*");
+        }
+      }
+      window.addEventListener("load", sendHeight);
+      window.addEventListener("resize", sendHeight);
+      sendHeight();
+    })();
+  </script>
+</body>
+</html>`;
+}
+
 async function buildEstimate(input) {
   const lead = input?.lead;
   const selection = input?.selection;
@@ -577,7 +748,11 @@ app.get('/api/health', async (_req, res) => {
     sendError(res, 503, 'Database unavailable.');
   }
 });
-app.get('/api/services', async (_req, res) => {
+app.get('/api/services', async (req, res) => {
+  if (!isAdminAuthenticated(req)) {
+    const killSwitch = await readKillSwitchStatusSafe('services');
+    if (!killSwitch.active) return sendError(res, 503, killSwitch.message || DEFAULT_KILL_SWITCH_MESSAGE);
+  }
   try {
     const catalog = await readCatalog();
     res.set('Cache-Control', 'no-store').json({ currency: CURRENCY_CODE, ...catalog });
@@ -594,9 +769,20 @@ app.get('/api/embed/config', (_req, res) => {
   });
 });
 
-app.get('/api/admin/session', (req, res) => {
+app.get('/api/admin/session', async (req, res) => {
   const authenticated = isAdminAuthenticated(req);
-  res.set('Cache-Control', 'no-store').json({ authenticated, webhookConfigured: Boolean(process.env.GHL_WEBHOOK_URL) });
+  if (!authenticated) {
+    return res.set('Cache-Control', 'no-store').json({ authenticated: false });
+  }
+  // Only an authenticated administrator learns the pause state here; it drives the
+  // dashboard-wide reminder banner. The section's own contents stay behind its password.
+  const killSwitch = await readKillSwitchStatusSafe('session');
+  res.set('Cache-Control', 'no-store').json({
+    authenticated: true,
+    webhookConfigured: Boolean(process.env.GHL_WEBHOOK_URL),
+    estimatorActive: killSwitch.active,
+    killSwitchUnlocked: isKillSwitchUnlocked(req)
+  });
 });
 
 app.post('/api/admin/login', requireSameOrigin, loginLimiter, (req, res) => {
@@ -614,6 +800,9 @@ app.post('/api/admin/login', requireSameOrigin, loginLimiter, (req, res) => {
 
 app.post('/api/admin/logout', requireSameOrigin, (req, res) => {
   res.clearCookie(COOKIE_NAME, { httpOnly: true, secure: IS_PRODUCTION, sameSite: 'strict', path: '/' });
+  // Signing out must also drop the kill switch unlock. Otherwise the next person to sign in
+  // on this browser would inherit an unlocked billing section without ever knowing its password.
+  clearKillSwitchUnlock(res);
   res.status(204).end();
 });
 
@@ -639,6 +828,13 @@ app.put('/api/services', requireSameOrigin, requireAdmin, async (req, res) => {
 });
 
 app.post('/api/estimate', requireSameOrigin, estimateLimiter, async (req, res) => {
+  // A signed-in administrator can still test estimate submissions while the estimator is
+  // paused for the public. Everyone else is blocked here as well as at /embed, so the
+  // switch also protects direct API callers who bypass the embedded calculator entirely.
+  if (!isAdminAuthenticated(req)) {
+    const killSwitch = await readKillSwitchStatusSafe('estimate');
+    if (!killSwitch.active) return sendError(res, 503, killSwitch.message || DEFAULT_KILL_SWITCH_MESSAGE);
+  }
   let payload;
   try {
     payload = await buildEstimate(req.body);
@@ -732,6 +928,57 @@ app.post('/api/admin/webhooks/:serviceId/test', requireSameOrigin, requireAdmin,
   }
 });
 
+const killSwitchUnlockLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: 'Too many attempts. Try again later.' }
+});
+
+// Reading the section's contents needs the kill switch password too, so the panel a
+// tampered-with frontend could draw stays empty: the status and the visitor-facing
+// message are only ever sent to a session that has entered it.
+app.get('/api/admin/kill-switch', requireAdmin, requireKillSwitchUnlock, async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store').json(await readKillSwitchStatus());
+  } catch (error) {
+    console.error('Kill switch status read failed:', error.message);
+    sendError(res, 503, 'Unable to load kill switch status.');
+  }
+});
+
+app.post('/api/admin/kill-switch/unlock', requireSameOrigin, requireAdmin, killSwitchUnlockLimiter, (req, res) => {
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!safeEqual(password, KILL_SWITCH_PASSWORD)) return sendError(res, 403, 'Invalid kill switch password.', 'KILL_SWITCH_PASSWORD_INVALID');
+  res.cookie(KILL_SWITCH_COOKIE_NAME, createSessionToken('kill-switch', KILL_SWITCH_TTL_SECONDS), {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: 'strict',
+    path: '/',
+    maxAge: KILL_SWITCH_TTL_SECONDS * 1000
+  });
+  res.json({ unlocked: true });
+});
+
+app.post('/api/admin/kill-switch/lock', requireSameOrigin, requireAdmin, (_req, res) => {
+  clearKillSwitchUnlock(res);
+  res.status(204).end();
+});
+
+app.put('/api/admin/kill-switch', requireSameOrigin, requireAdmin, requireKillSwitchUnlock, async (req, res) => {
+  if (typeof req.body?.active !== 'boolean') return sendError(res, 400, 'A boolean active value is required.');
+  const message = validateKillSwitchMessage(req.body?.message);
+  if (message === null) return sendError(res, 400, 'Message is too long (400 characters max).');
+  try {
+    res.json(await writeKillSwitchStatus(req.body.active, message));
+  } catch (error) {
+    console.error('Kill switch update failed:', error.message);
+    sendError(res, 500, 'Unable to update kill switch status.');
+  }
+});
+
 app.post('/api/admin/upload', requireSameOrigin, requireAdmin,
   express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '5mb' }),
   async (req, res) => {
@@ -769,13 +1016,19 @@ app.post('/api/admin/upload', requireSameOrigin, requireAdmin,
   }
 );
 
+// The project root is the single source of truth for browser assets: dashboard.html only
+// ever exists there, so app.js and styles.css must be read from the same place or the
+// dashboard markup and its script can drift out of sync. Any copy under public/ is a
+// legacy duplicate and is only used as a last-resort fallback for other host layouts —
+// never in preference to the real file, which is what previously caused an edited app.js
+// to be silently ignored while a stale public/app.js was served instead.
 function getFrontendFilePath(filename) {
   const candidates = [
-    path.join(__dirname, 'public', filename),
-    path.join(process.cwd(), 'public', filename),
     path.join(__dirname, filename),
     path.join(process.cwd(), filename),
     path.join(__dirname, '..', filename),
+    path.join(__dirname, 'public', filename),
+    path.join(process.cwd(), 'public', filename),
     path.join(__dirname, '..', 'public', filename),
     path.join(__dirname, 'api', filename),
     path.join(process.cwd(), 'api', filename)
@@ -807,8 +1060,18 @@ app.get('/login', (req, res, next) => {
   return sendFrontendFile('login.html', 'no-store')(req, res, next);
 });
 app.get(['/app', '/index.html'], requireAdminPage, sendFrontendFile('dashboard.html', 'no-store'));
-app.get('/embed', sendFrontendFile('dashboard.html', 'no-store', true));
-app.get('/app.js', sendFrontendFile('app.js', IS_PRODUCTION ? 'public, max-age=3600' : 'no-store', true));
+app.get('/embed', async (req, res, next) => {
+  // A signed-in administrator previewing their own /embed link (e.g. from the Embed
+  // Generator tab) always sees the live calculator, even while it is paused for the
+  // public, so they can keep working with their forms and confirm the switch's effect.
+  if (isAdminAuthenticated(req)) return sendFrontendFile('dashboard.html', 'no-store', true)(req, res, next);
+  const killSwitch = await readKillSwitchStatusSafe('embed');
+  if (killSwitch.active) return sendFrontendFile('dashboard.html', 'no-store', true)(req, res, next);
+  res.set('Cache-Control', 'no-store');
+  res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.status(503).type('html').send(renderKillSwitchPage(killSwitch.message));
+});
+app.get('/app.js', sendFrontendFile('app.js', 'no-store', true));
 app.get('/styles.css', sendFrontendFile('styles.css', IS_PRODUCTION ? 'public, max-age=3600' : 'no-store', true));
 
 app.use('/api', (_req, res) => sendError(res, 404, 'API endpoint not found.'));
@@ -840,3 +1103,6 @@ module.exports.readServices = readServices;
 module.exports.readWebhookStatuses = readWebhookStatuses;
 module.exports.validateWebhookUrl = validateWebhookUrl;
 module.exports.writeCatalog = writeCatalog;
+module.exports.validateKillSwitchMessage = validateKillSwitchMessage;
+module.exports.readKillSwitchStatus = readKillSwitchStatus;
+module.exports.writeKillSwitchStatus = writeKillSwitchStatus;

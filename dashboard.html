@@ -61,6 +61,12 @@
             <polyline points="8 6 2 12 8 18"/>
           </svg>
         </button>
+        <button class="icon-btn sidebar-nav-btn" data-view="kill-switch" title="Kill Switch — Billing Control">
+          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+            <line x1="12" y1="2" x2="12" y2="12"/>
+          </svg>
+        </button>
       </div>
 
       <div class="sidebar-group">
@@ -138,6 +144,9 @@
         <p>Interactive Min/Max Calculator & GHL Form Builder.</p>
       </header>
 
+      <!-- Persistent reminder shown whenever the kill switch has paused public embeds -->
+      <div id="global-kill-switch-banner" class="kill-switch-banner" hidden></div>
+
       <!-- MAIN INTERACTIVE APP VIEWS SECTION -->
       <div class="views-scroll-container">
         <!-- VIEW 1: LIVE ESTIMATOR (CLIENT CALCULATOR WIZARD) -->
@@ -182,6 +191,13 @@
         <section id="view-embed" class="view-section">
           <div id="embed-container">
             <!-- Dynamic Embed Generator Rendered by JavaScript -->
+          </div>
+        </section>
+
+        <!-- VIEW 5: KILL SWITCH (BILLING CONTROL) -->
+        <section id="view-kill-switch" class="view-section">
+          <div id="kill-switch-container">
+            <!-- Dynamic Kill Switch Panel Rendered by JavaScript -->
           </div>
         </section>
       </div>
@@ -286,7 +302,25 @@
     </div>
   </div>
 
+  <!-- Kill Switch Confirmation Modal Popup -->
+  <div class="modal-overlay" id="kill-switch-confirm-modal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 id="kill-switch-confirm-title" style="font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 10px;">
+          <span class="kill-switch-confirm-icon" id="kill-switch-confirm-icon"></span>
+          <span id="kill-switch-confirm-heading">Confirm</span>
+        </h3>
+        <button class="action-btn-icon" type="button" onclick="closeKillSwitchConfirm()">✕</button>
+      </div>
+      <p id="kill-switch-confirm-body" style="margin: 12px 0 26px 0; color: var(--text-muted); font-size: 14px; line-height: 1.6;"></p>
+      <div style="display: flex; justify-content: flex-end; gap: 12px;">
+        <button type="button" class="btn btn-secondary" onclick="closeKillSwitchConfirm()">Cancel</button>
+        <button type="button" class="btn btn-primary" id="kill-switch-confirm-accept" onclick="acceptKillSwitchConfirm()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Load App Script -->
-  <script src="app.js"></script>
+  <script src="/app.js?v=20260906-kill-switch-auth"></script>
 </body>
 </html>

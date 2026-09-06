@@ -8,3 +8,4 @@ npm-debug.log*
 .vercel
 .env*
 !.env.example
+Claude outputs/

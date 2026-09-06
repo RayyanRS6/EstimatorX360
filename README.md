@@ -38,6 +38,12 @@ It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CA
    - Share or embed all forms, every form in one category, or one individual form.
    - Includes ready-to-copy public links and HTML code for GHL Custom Code elements.
 
+6. **Kill Switch (Billing Control)**:
+   - One switch instantly pauses every public embed — the main `/embed` page and every category or single-form link generated from it — without touching any embed code already pasted on a customer's site.
+   - While paused, visitors see a short "temporarily unavailable" notice instead of the calculator, and direct calls to the estimate API are refused as well.
+   - Protected by a second, separate password (`KILL_SWITCH_PASSWORD`) in addition to the administrator login — being signed in as administrator is not enough by itself to change the pause state.
+   - An administrator who is signed in still sees the live calculator at `/embed` and in the dashboard while it is paused for everyone else, so forms can still be edited and tested.
+
 ---
 
 ## ⚡ How It Works (Calculation Formula)
@@ -84,6 +90,18 @@ The generated `/embed` page contains only the public calculator. It excludes the
 The root URL redirects unauthenticated visitors to `/login`. The dashboard routes (`/app` and `/index.html`) are enforced by the server and require the signed administrator session cookie. This is not a client-side visibility toggle: without a valid session, the dashboard HTML is never served.
 
 Public recipients use the links produced by the Embed Generator. `/embed` exposes all forms, `/embed?category=...` exposes one category, and `/embed?service=...` opens one form directly. These public routes intentionally contain no dashboard navigation or administrator controls.
+
+### Kill Switch (pausing embeds for a customer who hasn't paid)
+
+The **Kill Switch** tab (sidebar power icon) pauses or resumes every public embed at once — since every embed link ultimately loads through `/embed`, one switch covers the main page and every category or single-form link generated from it, with no need to edit or replace any embed code already on the customer's site.
+
+1. Sign in to the dashboard with `ADMIN_PASSWORD` as usual.
+2. Open the **Kill Switch** tab. It is locked behind its own separate password (`KILL_SWITCH_PASSWORD`, set in `.env`) — the administrator login alone does not unlock it, so a shared or unattended admin session can't accidentally flip it.
+3. Enter the kill switch password once to unlock the section for up to 20 minutes, then use **Turn Estimator OFF** / **Turn Estimator ON**. An optional custom message can be set for what visitors see while paused.
+4. While paused, every unauthenticated visit to `/embed` (and any category or service link built from it) shows a short "temporarily unavailable" notice instead of the calculator, and direct calls to the estimate submission API are refused with the same message. A signed-in administrator still sees the live calculator, so forms can still be reviewed or edited while paused.
+5. A red banner appears across the dashboard any time the estimator is left paused, as a reminder to turn it back on once the account is settled.
+
+`KILL_SWITCH_PASSWORD` must be at least 16 characters and different from `ADMIN_PASSWORD`; the server refuses to start otherwise. The pause state is stored in Firestore (`kill_switch` collection by default), so it persists across restarts and deployments; if Firestore is unreachable, public access stays unavailable until the server can verify the saved state. A missing status document defaults to live on first setup.
 
 ---
 
@@ -159,6 +177,6 @@ Deploy [firestore.rules](firestore.rules) from Firebase Console or an authentica
 - `.env` is the real private configuration read by the server. Change `ADMIN_PASSWORD` and integration credentials only in this file or in your hosting provider's encrypted environment settings. `GHL_WEBHOOK_URL` is an optional legacy fallback; new form-specific URLs are managed in the authenticated GHL Webhook screen.
 - `.env.example` contains variable names and harmless placeholders so another developer knows what to configure. It is safe to commit, but real passwords, API keys, secrets, and webhook URLs must never be added to it.
 
-After changing `ADMIN_PASSWORD`, restart the server. To immediately invalidate all existing administrator sessions, also replace `SESSION_SECRET` with a new random value of at least 32 characters.
+After changing `ADMIN_PASSWORD` or `KILL_SWITCH_PASSWORD`, restart the server. To immediately invalidate all existing administrator sessions (and all unlocked Kill Switch sections), also replace `SESSION_SECRET` with a new random value of at least 32 characters — both password systems are signed with it.
 
 For production, set `NODE_ENV=production`, serve the Node application behind HTTPS, and configure `FRAME_ANCESTORS` in `.env` or your hosting environment settings (by default, `self`, `http://localhost:*`, `http://127.0.0.1:*`, `https://bridgelandbuilders.com`, and `https://*.bridgelandbuilders.com` are allowed for `/embed`). See `SECURITY.md` before deployment.
