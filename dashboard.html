@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EstimatorX360 — Powered By AutomateX360</title>
-  <!-- Google Fonts: Outfit (Headings) & Google Sans Flex (Body) -->
+  <!-- Google Fonts: DM Sans -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20260906-dm-sans">
 </head>
 <body>
 
@@ -118,16 +118,16 @@
             <span class="notification-dot"></span>
           </button>
 
-          <div class="profile-pill" title="Administrator Session Active">
-            <div class="profile-avatar-icon">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-            </div>
-            <div class="profile-info">
-              <span class="profile-name">Administrator</span>
-              <span class="profile-email">Protected area</span>
-            </div>
-            <span class="profile-arrow">▼</span>
-          </div>
+          <button type="button" id="estimator-status-button" class="profile-pill estimator-status-button" data-status="unknown" onclick="switchView('kill-switch')" aria-label="Manage estimator availability" title="Manage estimator availability">
+            <span class="profile-avatar-icon" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+            </span>
+            <span class="profile-info">
+              <span class="profile-name" id="estimator-status-label" aria-live="polite">Checking estimator…</span>
+              <span class="profile-email">Manage</span>
+            </span>
+            <span class="profile-arrow" aria-hidden="true">↗</span>
+          </button>
         </div>
       </nav>
 
@@ -143,9 +143,6 @@
         </div>
         <p>Interactive Min/Max Calculator & GHL Form Builder.</p>
       </header>
-
-      <!-- Persistent reminder shown whenever the kill switch has paused public embeds -->
-      <div id="global-kill-switch-banner" class="kill-switch-banner" hidden></div>
 
       <!-- MAIN INTERACTIVE APP VIEWS SECTION -->
       <div class="views-scroll-container">
@@ -321,6 +318,6 @@
   </div>
 
   <!-- Load App Script -->
-  <script src="/app.js?v=20260906-kill-switch-auth"></script>
+  <script src="/app.js?v=20260906-dm-sans"></script>
 </body>
 </html>

@@ -42,7 +42,7 @@ It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CA
    - One switch instantly pauses every public embed — the main `/embed` page and every category or single-form link generated from it — without touching any embed code already pasted on a customer's site.
    - While paused, visitors see a short "temporarily unavailable" notice instead of the calculator, and direct calls to the estimate API are refused as well.
    - Protected by a second, separate password (`KILL_SWITCH_PASSWORD`) in addition to the administrator login — being signed in as administrator is not enough by itself to change the pause state.
-   - An administrator who is signed in still sees the live calculator at `/embed` and in the dashboard while it is paused for everyone else, so forms can still be edited and tested.
+   - Paused embeds are blocked for everyone, including signed-in administrators and dashboard embed previews. The protected form builder remains available.
 
 ---
 
@@ -98,8 +98,10 @@ The **Kill Switch** tab (sidebar power icon) pauses or resumes every public embe
 1. Sign in to the dashboard with `ADMIN_PASSWORD` as usual.
 2. Open the **Kill Switch** tab. It is locked behind its own separate password (`KILL_SWITCH_PASSWORD`, set in `.env`) — the administrator login alone does not unlock it, so a shared or unattended admin session can't accidentally flip it.
 3. Enter the kill switch password once to unlock the section for up to 20 minutes, then use **Turn Estimator OFF** / **Turn Estimator ON**. An optional custom message can be set for what visitors see while paused.
-4. While paused, every unauthenticated visit to `/embed` (and any category or service link built from it) shows a short "temporarily unavailable" notice instead of the calculator, and direct calls to the estimate submission API are refused with the same message. A signed-in administrator still sees the live calculator, so forms can still be reviewed or edited while paused.
-5. A red banner appears across the dashboard any time the estimator is left paused, as a reminder to turn it back on once the account is settled.
+4. While paused, every visit to `/embed` (including category/service links, iframes, and signed-in administrators) shows the unavailable notice. Public pricing and estimate submissions are blocked for everyone. The protected dashboard remains available for editing and resuming access.
+5. The header status button shows **Estimator live** or **Estimator paused** with a **Manage** shortcut to the Kill Switch section.
+
+Already-open embeds check availability every 15 seconds and when the page becomes visible again; they hide the calculator when paused or the status cannot be verified. Server-side submissions are blocked immediately. Existing tabs loaded before this update must be refreshed once to receive the availability check.
 
 `KILL_SWITCH_PASSWORD` must be at least 16 characters and different from `ADMIN_PASSWORD`; the server refuses to start otherwise. The pause state is stored in Firestore (`kill_switch` collection by default), so it persists across restarts and deployments; if Firestore is unreachable, public access stays unavailable until the server can verify the saved state. A missing status document defaults to live on first setup.
 

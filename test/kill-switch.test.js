@@ -22,6 +22,11 @@ let storedStatus;
 let readFails = false;
 let writeFails = false;
 mock.method(Firestore.prototype, 'collection', name => ({
+  async get() {
+    if (name === 'categories') return { empty: true, docs: [] };
+    assert.equal(name, 'services');
+    return { empty: false, docs: [{ id: 'kitchen', data: () => ({ title: 'Kitchen', icon: 'kitchen', baseCost: 0, questions: [] }) }] };
+  },
   doc(id) {
     assert.equal(name, 'kill_switch');
     assert.equal(id, 'status');
@@ -86,18 +91,27 @@ test('pause and resume persist, keep admin access, and protect every public embe
   assert.equal(session.killSwitchUnlocked, true);
   assert.equal(session.estimatorActive, false);
 
-  for (const url of embeds) {
-    const response = await request(url);
-    assert.equal(response.status, 503, url);
-    assert.equal(response.headers.get('cache-control'), 'no-store');
-    const html = await response.text();
-    assert.match(html, /Paused &lt;script&gt;/);
-    assert.doesNotMatch(html, /calculator-wizard-body|<script>alert/);
+  for (const cookie of ['', adminCookie, cookies]) {
+    for (const url of embeds) {
+      const response = await request(url, 'GET', cookie);
+      assert.equal(response.status, 503, url);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      const html = await response.text();
+      assert.match(html, /Paused &lt;script&gt;/);
+      assert.doesNotMatch(html, /calculator-wizard-body|<script>alert/);
+    }
+    assert.equal((await request('/api/services', 'GET', cookie)).status, 503);
+    assert.equal((await request('/api/estimate', 'POST', cookie, {})).status, 503);
+    const config = await (await request('/api/embed/config', 'GET', cookie)).json();
+    assert.equal(config.estimatorActive, false);
+    assert.equal(config.message, message);
   }
   assert.equal((await request('/api/services')).status, 503);
   assert.equal((await request('/api/estimate', 'POST', '', {})).status, 503);
   assert.equal((await request('/app', 'GET', adminCookie)).status, 200);
-  assert.equal((await request('/embed', 'GET', adminCookie)).status, 200);
+  assert.equal((await request('/embed', 'GET', adminCookie)).status, 503);
+  assert.equal((await request('/api/admin/services', 'GET', adminCookie)).status, 200);
+  assert.equal((await request('/api/admin/services')).status, 401);
 
   const expiredUnlock = `${adminCookie}; ${expiredCookie('priceguide_killswitch', 'kill-switch')}`;
   const retry = await request('/api/admin/kill-switch', 'PUT', expiredUnlock, { active: true });
@@ -111,6 +125,9 @@ test('pause and resume persist, keep admin access, and protect every public embe
 
   readFails = true;
   assert.equal((await request('/embed')).status, 503);
+  assert.equal((await request('/embed', 'GET', cookies)).status, 503);
+  assert.equal((await request('/api/services', 'GET', cookies)).status, 503);
+  assert.equal((await request('/api/estimate', 'POST', cookies, {})).status, 503);
   assert.equal((await request('/api/services')).status, 503);
   assert.equal((await request('/api/estimate', 'POST', '', {})).status, 503);
   assert.equal((await request('/api/admin/kill-switch', 'GET', cookies)).status, 503);
@@ -123,4 +140,7 @@ test('pause and resume persist, keep admin access, and protect every public embe
   assert.equal(resume.status, 200);
   assert.equal((await resume.json()).active, true);
   for (const url of embeds) assert.equal((await request(url)).status, 200);
+  assert.equal((await request('/embed', 'GET', cookies)).status, 200);
+  assert.equal((await request('/api/services')).status, 200);
+  assert.equal((await (await request('/api/embed/config')).json()).estimatorActive, true);
 });

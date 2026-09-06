@@ -20,7 +20,7 @@ function dashboard(responses) {
     CURRENCY_LOCALE: 'en-CA',
     getIconSvg: () => '', escapeHtml: value => String(value), setTimeout: () => {},
     renderAdminGate: element => { element.innerHTML = 'Administrator Password'; },
-    renderKillSwitchBanner: () => {}, showToast: message => toasts.push(message),
+    renderEstimatorStatusButton: () => {}, showToast: message => toasts.push(message),
     async fetch(url, options) {
       calls.push({ url, options });
       assert.ok(responses.length, `Unexpected request: ${url}`);

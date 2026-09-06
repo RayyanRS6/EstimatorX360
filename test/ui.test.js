@@ -29,15 +29,10 @@ test('option price inputs coordinate valid ranges and catalog saves are serializ
   assert.match(app, /catalogSaveQueue\.then\(performSave, performSave\)/);
 });
 
-test('the kill switch banner stays invisible until it is shown', () => {
-  const styles = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+test('estimator status replaces the global banner with a header management button', () => {
   const dashboard = fs.readFileSync(path.join(root, 'dashboard.html'), 'utf8');
-
-  // .kill-switch-banner sets display:flex, which outranks the browser's built-in
-  // [hidden] rule. Without this override the hidden banner renders as an empty
-  // coloured bar above every view.
-  assert.match(styles, /\.kill-switch-banner\[hidden\]\s*\{\s*display:\s*none/);
-  assert.match(dashboard, /id="global-kill-switch-banner"[^>]*hidden/);
+  assert.doesNotMatch(dashboard, /global-kill-switch-banner|Protected area/);
+  assert.match(dashboard, /<button[^>]*id="estimator-status-button"[^>]*onclick="switchView\('kill-switch'\)"/);
 });
 
 test('the kill switch confirms destructive changes in-app, not with a browser dialog', () => {

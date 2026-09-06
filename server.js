@@ -191,26 +191,30 @@ app.use((req, res, next) => {
   policy(req, res, next);
 });
 
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 300,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false
-}));
-app.use(express.json({ limit: '100kb', strict: true }));
 app.use('/api', (_req, res, next) => {
   res.set('Cache-Control', 'no-store');
   res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
   next();
 });
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again later.', code: 'RATE_LIMITED' }
+}));
+app.use(express.json({ limit: '100kb', strict: true }));
 
+// Password checks only compare server-held secrets; neither limiter touches Firestore.
+// Memory counters are per instance. Vercel needs an edge rule or shared store for
+// deployment-wide enforcement (see SECURITY.md).
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 5,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  message: { error: 'Too many login attempts. Try again later.' }
+  message: { error: 'Too many login attempts. Try again later.', code: 'RATE_LIMITED' }
 });
 
 const estimateLimiter = rateLimit({
@@ -541,11 +545,14 @@ function renderKillSwitchPage(message) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Estimator Unavailable</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: #F4F5F8;
     color: #121316;
     display: flex;
@@ -587,6 +594,14 @@ function renderKillSwitchPage(message) {
     margin: 0;
     white-space: pre-wrap;
   }
+  .notice-link {
+    display: inline-block;
+    margin-top: 20px;
+    color: #C43B20;
+    font-size: 14px;
+    font-weight: 700;
+    text-underline-offset: 4px;
+  }
 </style>
 </head>
 <body>
@@ -596,6 +611,7 @@ function renderKillSwitchPage(message) {
     </div>
     <h1>Estimator Temporarily Unavailable</h1>
     <p>${safeMessage}</p>
+    <a class="notice-link" href="https://automatex360.com" target="_top" rel="noreferrer">Visit AutomateX360 →</a>
   </div>
   <script>
     (function () {
@@ -748,11 +764,13 @@ app.get('/api/health', async (_req, res) => {
     sendError(res, 503, 'Database unavailable.');
   }
 });
-app.get('/api/services', async (req, res) => {
-  if (!isAdminAuthenticated(req)) {
-    const killSwitch = await readKillSwitchStatusSafe('services');
-    if (!killSwitch.active) return sendError(res, 503, killSwitch.message || DEFAULT_KILL_SWITCH_MESSAGE);
-  }
+async function requireActiveEstimator(_req, res, next) {
+  const killSwitch = await readKillSwitchStatusSafe('public-access');
+  if (!killSwitch.active) return sendError(res, 503, killSwitch.message || DEFAULT_KILL_SWITCH_MESSAGE);
+  next();
+}
+
+async function sendCatalog(_req, res) {
   try {
     const catalog = await readCatalog();
     res.set('Cache-Control', 'no-store').json({ currency: CURRENCY_CODE, ...catalog });
@@ -760,10 +778,16 @@ app.get('/api/services', async (req, res) => {
     console.error('Service read failed:', error.message);
     sendError(res, 503, 'Unable to load services.');
   }
-});
+}
+app.get('/api/services', requireActiveEstimator, sendCatalog);
+// Editing forms remains available through a separate authenticated dashboard route.
+app.get('/api/admin/services', requireAdmin, sendCatalog);
 
-app.get('/api/embed/config', (_req, res) => {
+app.get('/api/embed/config', async (_req, res) => {
+  const killSwitch = await readKillSwitchStatusSafe('embed-config');
   res.set('Cache-Control', 'no-store').json({
+    estimatorActive: killSwitch.active,
+    message: killSwitch.active ? '' : killSwitch.message || DEFAULT_KILL_SWITCH_MESSAGE,
     externalEnabled: externalFrameAncestors.length > 0,
     allowedParentOrigins: externalFrameAncestors
   });
@@ -827,14 +851,7 @@ app.put('/api/services', requireSameOrigin, requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/estimate', requireSameOrigin, estimateLimiter, async (req, res) => {
-  // A signed-in administrator can still test estimate submissions while the estimator is
-  // paused for the public. Everyone else is blocked here as well as at /embed, so the
-  // switch also protects direct API callers who bypass the embedded calculator entirely.
-  if (!isAdminAuthenticated(req)) {
-    const killSwitch = await readKillSwitchStatusSafe('estimate');
-    if (!killSwitch.active) return sendError(res, 503, killSwitch.message || DEFAULT_KILL_SWITCH_MESSAGE);
-  }
+app.post('/api/estimate', requireSameOrigin, estimateLimiter, requireActiveEstimator, async (req, res) => {
   let payload;
   try {
     payload = await buildEstimate(req.body);
@@ -934,7 +951,7 @@ const killSwitchUnlockLimiter = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  message: { error: 'Too many attempts. Try again later.' }
+  message: { error: 'Too many kill switch password attempts. Try again later.', code: 'RATE_LIMITED' }
 });
 
 // Reading the section's contents needs the kill switch password too, so the panel a
@@ -949,7 +966,7 @@ app.get('/api/admin/kill-switch', requireAdmin, requireKillSwitchUnlock, async (
   }
 });
 
-app.post('/api/admin/kill-switch/unlock', requireSameOrigin, requireAdmin, killSwitchUnlockLimiter, (req, res) => {
+app.post('/api/admin/kill-switch/unlock', requireSameOrigin, killSwitchUnlockLimiter, requireAdmin, (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!safeEqual(password, KILL_SWITCH_PASSWORD)) return sendError(res, 403, 'Invalid kill switch password.', 'KILL_SWITCH_PASSWORD_INVALID');
   res.cookie(KILL_SWITCH_COOKIE_NAME, createSessionToken('kill-switch', KILL_SWITCH_TTL_SECONDS), {
@@ -1061,10 +1078,7 @@ app.get('/login', (req, res, next) => {
 });
 app.get(['/app', '/index.html'], requireAdminPage, sendFrontendFile('dashboard.html', 'no-store'));
 app.get('/embed', async (req, res, next) => {
-  // A signed-in administrator previewing their own /embed link (e.g. from the Embed
-  // Generator tab) always sees the live calculator, even while it is paused for the
-  // public, so they can keep working with their forms and confirm the switch's effect.
-  if (isAdminAuthenticated(req)) return sendFrontendFile('dashboard.html', 'no-store', true)(req, res, next);
+  // Embed access always follows the switch, including administrator previews.
   const killSwitch = await readKillSwitchStatusSafe('embed');
   if (killSwitch.active) return sendFrontendFile('dashboard.html', 'no-store', true)(req, res, next);
   res.set('Cache-Control', 'no-store');

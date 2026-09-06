@@ -183,6 +183,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadState();
   renderView();
   initDashboardAnimations();
+  if (isEmbedMode) setupEmbedAvailabilityMonitoring();
 });
 
 async function loadState() {
@@ -191,7 +192,7 @@ async function loadState() {
   updateSyncStatus("syncing", "Loading...");
   try {
     const requests = [
-      fetch("/api/services", { headers: { Accept: "application/json" } }),
+      fetch(isEmbedMode ? "/api/services" : "/api/admin/services", { headers: { Accept: "application/json" } }),
       fetch("/api/embed/config", { headers: { Accept: "application/json" } })
     ];
     if (!isEmbedMode) {
@@ -237,29 +238,20 @@ async function loadState() {
     }
   }
 
-  renderKillSwitchBanner();
+  renderEstimatorStatusButton();
   renderView();
 }
 
-/**
- * Persistent reminder shown across every dashboard tab (never in embed mode) while the
- * public estimator is paused, so an administrator can't forget to turn it back on after
- * a customer pays.
- */
-function renderKillSwitchBanner() {
-  const banner = document.getElementById("global-kill-switch-banner");
-  if (!banner) return;
-  if (!state.killSwitch.loaded || state.killSwitch.active) {
-    banner.hidden = true;
-    banner.innerHTML = "";
-    return;
-  }
-  banner.hidden = false;
-  banner.innerHTML = `
-    ${getIconSvg('info')}
-    <span>The public estimator is currently <strong>paused</strong> — every <code>/embed</code> link is showing a temporary unavailable notice.</span>
-    <button type="button" class="btn btn-secondary kill-switch-banner-btn" onclick="switchView('kill-switch')">Manage</button>
-  `;
+function renderEstimatorStatusButton() {
+  const button = document.getElementById("estimator-status-button");
+  const label = document.getElementById("estimator-status-label");
+  if (!button || !label) return;
+  const status = !state.killSwitch.loaded ? "unknown" : state.killSwitch.active ? "live" : "paused";
+  const text = status === "unknown" ? "Estimator status" : `Estimator ${status}`;
+  button.dataset.status = status;
+  label.textContent = text;
+  button.setAttribute("aria-label", `${text}. Manage estimator availability`);
+  button.title = `${text} — Manage`;
 }
 
 function saveServicesState() {
@@ -1766,7 +1758,7 @@ function buildEmbedCode(scope = "all") {
   title="EstimatorX360 renovation estimator"
   loading="lazy"
   referrerpolicy="no-referrer"
-  sandbox="allow-forms allow-scripts allow-same-origin"
+  sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation"
   scrolling="no"
 ></iframe>
 <script>
@@ -1829,7 +1821,7 @@ function renderEmbedGenerator() {
 
       <div class="embed-preview-wrap">
         <div class="form-label">Live preview</div>
-        <iframe id="embed-preview" class="embed-preview" src="${escapeHtml(getEmbedUrl('all'))}" title="Estimator embed preview" sandbox="allow-forms allow-scripts allow-same-origin" scrolling="no"></iframe>
+        <iframe id="embed-preview" class="embed-preview" src="${escapeHtml(getEmbedUrl('all'))}" title="Estimator embed preview" sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation" scrolling="no"></iframe>
       </div>
 
       <div class="info-alert" style="margin-top: 20px;">
@@ -1952,7 +1944,7 @@ async function renderKillSwitchSettings() {
     state.killSwitch.updatedAt = result.updatedAt || "";
     state.killSwitch.unlocked = true;
     state.killSwitch.loaded = true;
-    renderKillSwitchBanner();
+    renderEstimatorStatusButton();
     renderKillSwitchPanel(container);
   } catch (error) {
     container.innerHTML = `
@@ -2032,7 +2024,7 @@ function renderKillSwitchPanel(container = document.getElementById("kill-switch-
 
       <div class="info-alert kill-switch-note">
         <div>${getIconSvg('info')}</div>
-        <div>While paused, estimate submissions are refused by the server as well, so nothing reaches GoHighLevel. You stay signed in, so you can still edit forms and preview the calculator yourself.</div>
+        <div>While paused, all embed links and previews are blocked, including for signed-in administrators. Estimate submissions are refused as well. You stay signed in and can still edit forms or turn the estimator back on.</div>
       </div>
     </div>
   `;
@@ -2158,11 +2150,68 @@ async function pushKillSwitchUpdate(active, message, successText) {
     state.killSwitch.updatedAt = result.updatedAt || "";
     state.killSwitch.loaded = true;
     showToast(successText);
-    renderKillSwitchBanner();
+    renderEstimatorStatusButton();
     renderKillSwitchPanel();
   } catch (error) {
     showToast(error.message);
   }
+}
+
+function setupEmbedAvailabilityMonitoring() {
+  let checking = false;
+  let blocked = false;
+  const check = async () => {
+    if (checking) return;
+    checking = true;
+    try {
+      const response = await fetch("/api/embed/config", {
+        credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(10000),
+        headers: { Accept: "application/json" }
+      });
+      if (!response.ok) throw new Error("Unable to verify estimator availability.");
+      const status = await response.json();
+      if (status.estimatorActive !== true) {
+        showUnavailable(status.message);
+      } else if (blocked) {
+        // Reload the selected category/service from the server after access resumes.
+        window.location.reload();
+      }
+    } catch {
+      showUnavailable();
+    } finally {
+      checking = false;
+    }
+  };
+  const showUnavailable = message => {
+    blocked = true;
+    const dashboard = document.getElementById("dashboardApp");
+    if (dashboard) dashboard.style.display = "none";
+    document.querySelectorAll(".modal-overlay").forEach(modal => { modal.style.display = "none"; });
+    let notice = document.getElementById("embed-unavailable-notice");
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.id = "embed-unavailable-notice";
+      notice.className = "settings-card";
+      notice.setAttribute("role", "status");
+      document.body.appendChild(notice);
+    }
+    notice.textContent = message || "This estimator is temporarily unavailable. Please check back soon or contact us directly.";
+    const websiteLink = document.createElement("a");
+    websiteLink.href = "https://automatex360.com";
+    websiteLink.target = "_top";
+    websiteLink.rel = "noreferrer";
+    websiteLink.className = "unavailable-website-link";
+    websiteLink.textContent = "Visit AutomateX360 →";
+    notice.appendChild(websiteLink);
+    window.parent.postMessage({ type: "automatex360:resize", height: 300 }, "*");
+  };
+  check();
+  // An already-open iframe must notice a pause without waiting for a page refresh.
+  setInterval(check, 15000);
+  window.addEventListener("pageshow", check);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) check();
+  });
 }
 
 function setupEmbeddedHeightMessaging() {
