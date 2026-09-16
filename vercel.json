@@ -8,7 +8,7 @@
   ],
   "functions": {
     "api/index.js": {
-      "includeFiles": "{dashboard.html,login.html,app.js,styles.css}"
+      "includeFiles": "{dashboard.html,login.html,app.js,styles.css,favicon.svg,favicon.ico,favicon.png}"
     }
   },
   "rewrites": [

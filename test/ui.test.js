@@ -81,3 +81,16 @@ test('the project root takes priority over any legacy public/ duplicate', () => 
   assert.ok(rootIndex > -1 && publicIndex > -1);
   assert.ok(rootIndex < publicIndex, 'the root file must be resolved before the public/ copy');
 });
+
+test('tab logo favicons are present and referenced in dashboard and login pages', () => {
+  const dashboard = fs.readFileSync(path.join(root, 'dashboard.html'), 'utf8');
+  const login = fs.readFileSync(path.join(root, 'login.html'), 'utf8');
+
+  assert.match(dashboard, /rel="icon"[^>]*href="\/favicon\.svg"/);
+  assert.match(dashboard, /rel="alternate icon"[^>]*href="\/favicon\.ico"/);
+  assert.match(login, /rel="icon"[^>]*href="\/favicon\.svg"/);
+  assert.match(login, /rel="alternate icon"[^>]*href="\/favicon\.ico"/);
+
+  assert.ok(fs.existsSync(path.join(root, 'favicon.svg')));
+  assert.ok(fs.existsSync(path.join(root, 'favicon.ico')));
+});

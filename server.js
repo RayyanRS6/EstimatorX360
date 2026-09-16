@@ -1087,6 +1087,9 @@ app.get('/embed', async (req, res, next) => {
 });
 app.get('/app.js', sendFrontendFile('app.js', 'no-store', true));
 app.get('/styles.css', sendFrontendFile('styles.css', IS_PRODUCTION ? 'public, max-age=3600' : 'no-store', true));
+app.get('/favicon.svg', sendFrontendFile('favicon.svg', 'public, max-age=86400', true));
+app.get('/favicon.ico', sendFrontendFile('favicon.ico', 'public, max-age=86400', true));
+app.get('/favicon.png', sendFrontendFile('favicon.png', 'public, max-age=86400', true));
 
 app.use('/api', (_req, res) => sendError(res, 404, 'API endpoint not found.'));
 app.use((error, _req, res, _next) => {
