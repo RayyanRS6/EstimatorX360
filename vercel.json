@@ -1,8 +1,14 @@
 {
   "version": 2,
+  "headers": [
+    {
+      "source": "/app.js",
+      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+    }
+  ],
   "functions": {
     "api/index.js": {
-      "includeFiles": "{public/**,index.html,app.js,styles.css}"
+      "includeFiles": "{dashboard.html,login.html,app.js,styles.css,favicon.svg,favicon.ico,favicon.png}"
     }
   },
   "rewrites": [

@@ -21,6 +21,8 @@ It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CA
 
 3. **No-Code Form & Price Builder**:
    - Create new services or edit existing ones.
+   - Create, rename, and remove form categories, and assign each form to any number of categories.
+   - Existing forms without category data are automatically treated as Residential.
    - Prevent duplicate form names regardless of capitalization or repeated whitespace.
    - Modify Base Costs (call-out or minimum charges).
    - Add/delete questions, toggle Single Choice vs Multiple Choice.
@@ -32,8 +34,15 @@ It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CA
    - Assigns a separate protected GHL inbound webhook to every form.
    - Includes lead details, estimates, an itemized answer array, and separate plain-text `answer_fields` values for mapping every question independently.
 
-5. **Easy GHL iFrame Embedding**:
-   - Includes ready-to-copy HTML code block for GHL Custom Code elements.
+5. **Flexible Sharing and GHL iFrame Embedding**:
+   - Share or embed all forms, every form in one category, or one individual form.
+   - Includes ready-to-copy public links and HTML code for GHL Custom Code elements.
+
+6. **Kill Switch (Billing Control)**:
+   - One switch instantly pauses every public embed — the main `/embed` page and every category or single-form link generated from it — without touching any embed code already pasted on a customer's site.
+   - While paused, visitors see a short "temporarily unavailable" notice instead of the calculator, and direct calls to the estimate API are refused as well.
+   - Protected by a second, separate password (`KILL_SWITCH_PASSWORD`) in addition to the administrator login — being signed in as administrator is not enough by itself to change the pause state.
+   - Paused embeds are blocked for everyone, including signed-in administrators and dashboard embed previews. The protected form builder remains available.
 
 ---
 
@@ -69,11 +78,31 @@ Saved webhook URLs are stored in a separate server-only Firestore collection. Th
 ### Step 3: Authorize and embed the calculator
 1. Set `FRAME_ANCESTORS` in the private `.env` file if adding custom domains (by default, `self`, `http://localhost:*`, `http://127.0.0.1:*`, `https://bridgelandbuilders.com`, and `https://*.bridgelandbuilders.com` are allowed).
 2. Open the **Embed Generator** tab in EstimatorX360.
-3. Choose **All service forms** or one specific service and click **Copy Embed Code**.
-4. In GHL Page Builder, drag a **Custom Code / HTML** element onto your landing page.
-5. Paste the code into the Custom HTML editor, save, and publish.
+3. Choose **All forms**, one category, or one specific form.
+4. Use **Copy Share Link** for a standalone public calculator URL, or **Copy Embed Code** for an iframe.
+5. In GHL Page Builder, drag a **Custom Code / HTML** element onto your landing page.
+6. Paste the code into the Custom HTML editor, save, and publish.
 
 The generated `/embed` page contains only the public calculator. It excludes the navigation, form builder, webhook settings, and administrator session lookup. Its resize message contains only a numeric height, and the generated parent script verifies both the iframe window and its origin before resizing. The main dashboard cannot be framed by external sites.
+
+### Private dashboard and public form links
+The root URL redirects unauthenticated visitors to `/login`. The dashboard routes (`/app` and `/index.html`) are enforced by the server and require the signed administrator session cookie. This is not a client-side visibility toggle: without a valid session, the dashboard HTML is never served.
+
+Public recipients use the links produced by the Embed Generator. `/embed` exposes all forms, `/embed?category=...` exposes one category, and `/embed?service=...` opens one form directly. These public routes intentionally contain no dashboard navigation or administrator controls.
+
+### Kill Switch (pausing embeds for a customer who hasn't paid)
+
+The **Kill Switch** tab (sidebar power icon) pauses or resumes every public embed at once — since every embed link ultimately loads through `/embed`, one switch covers the main page and every category or single-form link generated from it, with no need to edit or replace any embed code already on the customer's site.
+
+1. Sign in to the dashboard with `ADMIN_PASSWORD` as usual.
+2. Open the **Kill Switch** tab. It is locked behind its own separate password (`KILL_SWITCH_PASSWORD`, set in `.env`) — the administrator login alone does not unlock it, so a shared or unattended admin session can't accidentally flip it.
+3. Enter the kill switch password once to unlock the section for up to 20 minutes, then use **Turn Estimator OFF** / **Turn Estimator ON**. An optional custom message can be set for what visitors see while paused.
+4. While paused, every visit to `/embed` (including category/service links, iframes, and signed-in administrators) shows the unavailable notice. Public pricing and estimate submissions are blocked for everyone. The protected dashboard remains available for editing and resuming access.
+5. The header status button shows **Estimator live** or **Estimator paused** with a **Manage** shortcut to the Kill Switch section.
+
+Already-open embeds check availability every 15 seconds and when the page becomes visible again; they hide the calculator when paused or the status cannot be verified. Server-side submissions are blocked immediately. Existing tabs loaded before this update must be refreshed once to receive the availability check.
+
+`KILL_SWITCH_PASSWORD` must be at least 16 characters and different from `ADMIN_PASSWORD`; the server refuses to start otherwise. The pause state is stored in Firestore (`kill_switch` collection by default), so it persists across restarts and deployments; if Firestore is unreachable, public access stays unavailable until the server can verify the saved state. A missing status document defaults to live on first setup.
 
 ---
 
@@ -127,7 +156,7 @@ Every form question automatically produces a reference name in the format `Form 
 
 ## 🚀 Running Locally
 
-This application now requires its security server; do not open `index.html` directly or deploy it as a static-only site.
+This application requires its security server; do not expose `dashboard.html` directly or deploy the project as a static-only site.
 
 ```powershell
 npm install
@@ -138,7 +167,7 @@ Then open `http://localhost:3000`. The generated administrator password is store
 
 ### Firestore server authentication
 
-The application has no local/default service catalogue. It reads the `services` collection directly from Firestore and fails closed when the database is unavailable.
+The application has no local/default service catalogue. It reads the `services` and `categories` collections directly from Firestore and fails closed when the database is unavailable. If the `categories` collection is initially empty, the server exposes a default Residential category and assigns legacy service documents to it; the first administrator save persists that migration.
 
 For local or non-Google hosting, set `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` from a least-privilege Firebase service account. On Google Cloud hosting, use Application Default Credentials and set `FIREBASE_USE_ADC=true`. A Firebase browser API key is not a server credential.
 
@@ -149,6 +178,6 @@ Deploy [firestore.rules](firestore.rules) from Firebase Console or an authentica
 - `.env` is the real private configuration read by the server. Change `ADMIN_PASSWORD` and integration credentials only in this file or in your hosting provider's encrypted environment settings. `GHL_WEBHOOK_URL` is an optional legacy fallback; new form-specific URLs are managed in the authenticated GHL Webhook screen.
 - `.env.example` contains variable names and harmless placeholders so another developer knows what to configure. It is safe to commit, but real passwords, API keys, secrets, and webhook URLs must never be added to it.
 
-After changing `ADMIN_PASSWORD`, restart the server. To immediately invalidate all existing administrator sessions, also replace `SESSION_SECRET` with a new random value of at least 32 characters.
+After changing `ADMIN_PASSWORD` or `KILL_SWITCH_PASSWORD`, restart the server. To immediately invalidate all existing administrator sessions (and all unlocked Kill Switch sections), also replace `SESSION_SECRET` with a new random value of at least 32 characters — both password systems are signed with it.
 
 For production, set `NODE_ENV=production`, serve the Node application behind HTTPS, and configure `FRAME_ANCESTORS` in `.env` or your hosting environment settings (by default, `self`, `http://localhost:*`, `http://127.0.0.1:*`, `https://bridgelandbuilders.com`, and `https://*.bridgelandbuilders.com` are allowed for `/embed`). See `SECURITY.md` before deployment.

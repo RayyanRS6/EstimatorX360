@@ -4,6 +4,7 @@
    ------------------------------------------------------------- */
 
 let state = {
+  categories: [],
   services: [],
   adminAuthenticated: false,
   webhook: {
@@ -14,9 +15,17 @@ let state = {
     allowedParentOrigins: [],
     externalEnabled: false
   },
-  currentView: "calculator", // 'calculator' | 'builder' | 'webhook' | 'embed'
+  killSwitch: {
+    active: true,
+    message: "",
+    updatedAt: "",
+    unlocked: false,
+    loaded: false
+  },
+  currentView: "calculator", // 'calculator' | 'builder' | 'webhook' | 'embed' | 'kill-switch'
   calculator: {
     selectedServiceId: null,
+    categoryFilterId: "",
     currentStep: 0, // 0 = select service, 1..N = questions, N+1 = lead form
     answers: {}, // { [questionId]: [optionIndex, ...] }
     lead: {
@@ -38,8 +47,11 @@ const CURRENCY_LOCALE = "en-CA";
 const pageUrl = new URL(window.location.href);
 const isEmbedMode = pageUrl.pathname.replace(/\/$/, '').endsWith('/embed') || pageUrl.searchParams.get('embed') === '1';
 const requestedEmbedServiceId = isEmbedMode ? (pageUrl.searchParams.get('service') || '') : '';
+const requestedEmbedCategoryId = isEmbedMode && !requestedEmbedServiceId ? (pageUrl.searchParams.get('category') || '') : '';
 let embedResizeFrame = null;
 let lastEmbeddedHeight = 0;
+let catalogSaveQueue = Promise.resolve();
+let catalogSaveRevision = 0;
 
 // --- CLEAN MINIMAL SVG ICON LIBRARY (NO 3D EMOJIS) ---
 function getIconSvg(name) {
@@ -91,6 +103,11 @@ function getIconSvg(name) {
     case 'embed':
     case 'code':
       return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`;
+    case 'kill-switch':
+    case 'power':
+      return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>`;
+    case 'lock':
+      return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
     case 'search':
       return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
     case 'bell':
@@ -140,7 +157,6 @@ function getOptimizedImageUrl(url, width = 600, height = null, crop = 'fill') {
 
     return url.replace('/upload/', `/upload/${transforms.join(',')}/`);
   }
-
 }
 
 // Service configuration is loaded from the protected server API.
@@ -167,14 +183,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadState();
   renderView();
   initDashboardAnimations();
+  if (isEmbedMode) setupEmbedAvailabilityMonitoring();
 });
 
 async function loadState() {
+  state.categories = [];
   state.services = [];
   updateSyncStatus("syncing", "Loading...");
   try {
     const requests = [
-      fetch("/api/services", { headers: { Accept: "application/json" } }),
+      fetch(isEmbedMode ? "/api/services" : "/api/admin/services", { headers: { Accept: "application/json" } }),
       fetch("/api/embed/config", { headers: { Accept: "application/json" } })
     ];
     if (!isEmbedMode) {
@@ -185,6 +203,7 @@ async function loadState() {
     if (servicesResponse.ok) {
       const data = await servicesResponse.json();
       if (data.currency !== CURRENCY_CODE) throw new Error(`Server pricing currency must be ${CURRENCY_CODE}.`);
+      if (Array.isArray(data.categories) && data.categories.length) state.categories = data.categories;
       if (Array.isArray(data.services) && data.services.length) state.services = data.services;
     }
     if (embedConfigResponse.ok) {
@@ -197,6 +216,9 @@ async function loadState() {
     if (sessionResponse?.ok) {
       const session = await sessionResponse.json();
       state.adminAuthenticated = Boolean(session.authenticated);
+      state.killSwitch.active = session.estimatorActive !== false;
+      state.killSwitch.unlocked = Boolean(session.killSwitchUnlocked);
+      state.killSwitch.loaded = true;
     }
     updateSyncStatus("live", "Secure Server");
   } catch (error) {
@@ -206,6 +228,9 @@ async function loadState() {
 
   if (state.services.length > 0) {
     state.builder.activeServiceId = state.services[0].id;
+    if (requestedEmbedCategoryId && state.categories.some(category => category.id === requestedEmbedCategoryId)) {
+      state.calculator.categoryFilterId = requestedEmbedCategoryId;
+    }
     const embeddedService = state.services.find(service => service.id === requestedEmbedServiceId);
     if (embeddedService) {
       state.calculator.selectedServiceId = embeddedService.id;
@@ -213,37 +238,64 @@ async function loadState() {
     }
   }
 
+  renderEstimatorStatusButton();
   renderView();
 }
 
-async function saveServicesState() {
+function renderEstimatorStatusButton() {
+  const button = document.getElementById("estimator-status-button");
+  const label = document.getElementById("estimator-status-label");
+  if (!button || !label) return;
+  const status = !state.killSwitch.loaded ? "unknown" : state.killSwitch.active ? "live" : "paused";
+  const text = status === "unknown" ? "Estimator status" : `Estimator ${status}`;
+  button.dataset.status = status;
+  label.textContent = text;
+  button.setAttribute("aria-label", `${text}. Manage estimator availability`);
+  button.title = `${text} — Manage`;
+}
+
+function saveServicesState() {
   if (!state.adminAuthenticated) {
     showToast("Administrator login required.");
-    return false;
+    return Promise.resolve(false);
   }
-  try {
-    updateSyncStatus("syncing", "Saving...");
-    const response = await fetch("/api/services", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ services: state.services })
-    });
-    if (response.status === 401) {
-      state.adminAuthenticated = false;
-      throw new Error("Your administrator session expired.");
+  const revision = ++catalogSaveRevision;
+  const requestBody = JSON.stringify({ categories: state.categories, services: state.services });
+
+  const performSave = async () => {
+    try {
+      if (revision === catalogSaveRevision) updateSyncStatus("syncing", "Saving...");
+      const response = await fetch("/api/services", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: requestBody
+      });
+      if (response.status === 401) {
+        state.adminAuthenticated = false;
+        throw new Error("Your administrator session expired.");
+      }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Unable to save services.");
+      if (data.currency !== CURRENCY_CODE) throw new Error(`Server pricing currency must be ${CURRENCY_CODE}.`);
+      if (revision === catalogSaveRevision) {
+        state.categories = data.categories;
+        state.services = data.services;
+        updateSyncStatus("live", "Secure Server");
+      }
+      return true;
+    } catch (error) {
+      console.error("Secure save failed:", error.message);
+      if (revision === catalogSaveRevision) {
+        updateSyncStatus("offline", "Save Failed");
+        showToast(error.message);
+      }
+      return false;
     }
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Unable to save services.");
-    if (data.currency !== CURRENCY_CODE) throw new Error(`Server pricing currency must be ${CURRENCY_CODE}.`);
-    state.services = data.services;
-    updateSyncStatus("live", "Secure Server");
-    return true;
-  } catch (error) {
-    console.error("Secure save failed:", error.message);
-    updateSyncStatus("offline", "Save Failed");
-    showToast(error.message);
-    return false;
-  }
+  };
+
+  const saveRequest = catalogSaveQueue.then(performSave, performSave);
+  catalogSaveQueue = saveRequest.then(() => undefined, () => undefined);
+  return saveRequest;
 }
 
 // --- CLOUDINARY OPTION IMAGE UPLOAD HANDLER ---
@@ -378,6 +430,8 @@ function renderView() {
     renderWebhookSettings();
   } else if (state.currentView === "embed") {
     renderEmbedGenerator();
+  } else if (state.currentView === "kill-switch") {
+    renderKillSwitchSettings();
   }
   setTimeout(initCustomSelects, 10);
 }
@@ -388,6 +442,31 @@ function renderView() {
 
 function getSelectedService() {
   return state.services.find(s => s.id === state.calculator.selectedServiceId);
+}
+
+function getCategory(categoryId) {
+  return state.categories.find(category => category.id === categoryId);
+}
+
+function getServiceCategoryNames(service) {
+  return (service?.categoryIds || [])
+    .map(categoryId => getCategory(categoryId)?.name)
+    .filter(Boolean);
+}
+
+function getVisibleCalculatorServices() {
+  const categoryId = requestedEmbedCategoryId || state.calculator.categoryFilterId;
+  if (!categoryId) return state.services;
+  return state.services.filter(service => (service.categoryIds || []).includes(categoryId));
+}
+
+function selectCalculatorCategory(categoryId) {
+  if (requestedEmbedCategoryId) return;
+  state.calculator.categoryFilterId = categoryId;
+  state.calculator.selectedServiceId = null;
+  state.calculator.currentStep = 0;
+  state.calculator.answers = {};
+  renderCalculator();
 }
 
 function calculateEstimate() {
@@ -456,24 +535,40 @@ function renderCalculator() {
     if (progressBarContainer) progressBarContainer.style.display = "none";
     if (progressBar) progressBar.style.width = "0%";
 
+    const visibleServices = getVisibleCalculatorServices();
+    const fixedCategory = requestedEmbedCategoryId ? getCategory(requestedEmbedCategoryId) : null;
     let html = `
-      <div class="section-title">Select Your Renovation Service</div>
-      <div class="section-desc">Choose a service category below to calculate your instant min/max price estimate.</div>
-      <div class="services-grid">
+      <div class="section-title">${fixedCategory ? `${escapeHtml(fixedCategory.name)} Forms` : 'Select Your Renovation Service'}</div>
+      <div class="section-desc">${fixedCategory ? `Choose a ${escapeHtml(fixedCategory.name)} form to calculate your instant min/max price estimate.` : 'Choose a form below to calculate your instant min/max price estimate.'}</div>
     `;
 
-    state.services.forEach(s => {
+    if (!requestedEmbedCategoryId && state.categories.length > 1) {
+      html += `<div class="category-filter-bar">
+        <button class="category-filter-btn ${state.calculator.categoryFilterId ? '' : 'active'}" onclick="selectCalculatorCategory('')">All forms</button>
+        ${state.categories.map(category => `
+          <button class="category-filter-btn ${state.calculator.categoryFilterId === category.id ? 'active' : ''}" onclick="selectCalculatorCategory('${category.id}')">${escapeHtml(category.name)}</button>
+        `).join('')}
+      </div>`;
+    }
+
+    html += `<div class="services-grid">`;
+
+    visibleServices.forEach(s => {
+      const categoryNames = getServiceCategoryNames(s);
       html += `
         <div class="service-card" onclick="selectServiceForCalc('${s.id}')">
           <div class="service-card-icon">${getIconSvg(s.icon || s.id || s.title)}</div>
           <div class="service-card-title">${escapeHtml(s.title)}</div>
+          ${categoryNames.length ? `<div class="service-card-categories">${categoryNames.map(name => `<span>${escapeHtml(name)}</span>`).join('')}</div>` : ''}
           <div class="service-card-base">Base Starting Price: ${formatCurrency(s.baseCost)}</div>
           <button class="btn btn-primary" style="margin-top: 14px; width: 100%;">Select & Estimate →</button>
         </div>
       `;
     });
 
-    html += `</div>`;
+    html += visibleServices.length
+      ? `</div>`
+      : `</div><div class="empty-category-state">No forms are currently assigned to this category.</div>`;
     calcBody.innerHTML = html + getBrandFooterHtml();
     return;
   }
@@ -752,6 +847,7 @@ async function adminLogin(event, destination) {
     state.adminAuthenticated = true;
     showToast("Administrator access granted.");
     if (destination === "webhook") renderWebhookSettings();
+    else if (destination === "kill-switch") renderKillSwitchSettings();
     else renderBuilder();
   } catch (error) {
     showToast(error.message);
@@ -761,9 +857,7 @@ async function adminLogin(event, destination) {
 async function adminLogout() {
   await fetch("/api/admin/logout", { method: "POST" });
   state.adminAuthenticated = false;
-  state.currentView = "calculator";
-  switchView("calculator");
-  showToast("Signed out.");
+  window.location.replace("/login");
 }
 
 function renderBuilder() {
@@ -775,11 +869,34 @@ function renderBuilder() {
     <div class="builder-header">
       <div>
         <h2 class="section-title">EstimatorX360 Form Builder</h2>
-        <p class="section-desc">Add services, configure starting base costs, edit questions, and set Min/Max price ranges.</p>
+        <p class="section-desc">Organize forms into categories, configure starting costs, edit questions, and set Min/Max price ranges.</p>
       </div>
       <div style="display: flex; gap: 10px;">
         <button class="btn btn-primary" onclick="addNewServicePrompt()">${getIconSvg('plus')} Create Service</button>
         <button class="btn btn-secondary" onclick="adminLogout()">Sign Out</button>
+      </div>
+    </div>
+
+    <div class="category-manager-card">
+      <div class="category-manager-heading">
+        <div>
+          <h3>Form Categories</h3>
+          <p>Add or remove categories, then choose which categories each form belongs to.</p>
+        </div>
+        <div class="category-create-row">
+          <input type="text" id="new-category-name" class="form-input" maxlength="120" placeholder="e.g. Commercial" onkeydown="if(event.key === 'Enter'){event.preventDefault();addCategoryFromInput();}" />
+          <button class="btn btn-primary" type="button" onclick="addCategoryFromInput()">${getIconSvg('plus')} Add Category</button>
+        </div>
+      </div>
+      <div class="category-manager-list">
+        ${state.categories.map(category => {
+          const formCount = state.services.filter(service => (service.categoryIds || []).includes(category.id)).length;
+          return `<div class="category-manager-item">
+            <input class="form-input" value="${escapeHtml(category.name)}" aria-label="Category name" onchange="updateCategoryName('${category.id}', this.value)" />
+            <span class="category-form-count">${formCount} ${formCount === 1 ? 'form' : 'forms'}</span>
+            <button class="action-btn-icon category-delete-btn" type="button" onclick="deleteCategory('${category.id}')" title="Delete category" ${state.categories.length === 1 ? 'disabled' : ''}>${getIconSvg('trash')}</button>
+          </div>`;
+        }).join('')}
       </div>
     </div>
 
@@ -834,9 +951,24 @@ function renderBuilder() {
         </div>
       </div>
 
+      <div class="service-category-editor">
+        <div>
+          <h3>Categories for this form</h3>
+          <p>A form may appear in more than one category. Clear every checkbox to keep it available only under “All forms.”</p>
+        </div>
+        <div class="category-checkbox-list">
+          ${state.categories.map(category => `
+            <label class="category-checkbox">
+              <input type="checkbox" ${(activeService.categoryIds || []).includes(category.id) ? 'checked' : ''} onchange="toggleServiceCategory('${activeService.id}', '${category.id}', this.checked)" />
+              <span>${escapeHtml(category.name)}</span>
+            </label>
+          `).join('')}
+        </div>
+      </div>
+
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3 style="font-size: 17px; font-weight: 700;">Questions & Min/Max Price Options</h3>
-        <button class="btn btn-secondary" onclick="addQuestionToService('${activeService.id}')">${getIconSvg('plus')} Add Question</button>
+        <button class="btn btn-primary" onclick="addQuestionToService('${activeService.id}', 'start')">${getIconSvg('plus')} Add Question</button>
       </div>
   `;
 
@@ -847,7 +979,7 @@ function renderBuilder() {
         <div class="question-card-header">
           <div style="flex-grow: 1; display: flex; gap: 12px; align-items: center;">
             <span style="font-weight: 800; color: var(--accent-coral);">Q${qIndex + 1}</span>
-            <input type="text" class="form-input" style="flex-grow: 1;" value="${escapeHtml(q.title)}" onchange="updateQuestionTitle('${activeService.id}', '${q.id}', this.value)" placeholder="Enter Question Title..." />
+            <input type="text" class="form-input" data-question-id="${q.id}" style="flex-grow: 1;" value="${escapeHtml(q.title)}" onchange="updateQuestionTitle('${activeService.id}', '${q.id}', this.value)" placeholder="Enter Question Title..." />
             <select class="form-select" style="width: 160px;" onchange="updateQuestionType('${activeService.id}', '${q.id}', this.value)">
               <option value="single" ${q.type === 'single' ? 'selected' : ''}>Single Choice</option>
               <option value="multiple" ${q.type === 'multiple' ? 'selected' : ''}>Multiple Choice</option>
@@ -881,7 +1013,7 @@ function renderBuilder() {
           <input type="text" class="form-input" value="${escapeHtml(opt.label)}" onchange="updateOptionLabel('${activeService.id}', '${q.id}', ${optIndex}, this.value)" placeholder="Option Name..." />
           <div class="input-with-prefix">
             <span class="input-prefix">$</span>
-            <input type="number" step="100" class="form-input" value="${opt.minPrice}" placeholder="Min Price" onchange="updateOptionMinPrice('${activeService.id}', '${q.id}', ${optIndex}, this.value)" />
+            <input type="number" min="0" max="100000000" step="100" class="form-input" data-price-kind="min" value="${opt.minPrice}" placeholder="Min Price" onchange="updateOptionMinPrice('${activeService.id}', '${q.id}', ${optIndex}, this.value, this)" />
             <div class="stepper-btn-group">
               <button type="button" class="stepper-btn" onclick="stepPriceInput(this, 100)" title="Increase CAD $100">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
@@ -893,7 +1025,7 @@ function renderBuilder() {
           </div>
           <div class="input-with-prefix">
             <span class="input-prefix">$</span>
-            <input type="number" step="100" class="form-input" value="${opt.maxPrice}" placeholder="Max Price" onchange="updateOptionMaxPrice('${activeService.id}', '${q.id}', ${optIndex}, this.value)" />
+            <input type="number" min="0" max="100000000" step="100" class="form-input" data-price-kind="max" value="${opt.maxPrice}" placeholder="Max Price" onchange="updateOptionMaxPrice('${activeService.id}', '${q.id}', ${optIndex}, this.value, this)" />
             <div class="stepper-btn-group">
               <button type="button" class="stepper-btn" onclick="stepPriceInput(this, 100)" title="Increase CAD $100">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
@@ -919,6 +1051,14 @@ function renderBuilder() {
     `;
   });
 
+  if (activeService.questions.length > 0) {
+    html += `
+      <div style="display: flex; justify-content: center; margin-bottom: 22px;">
+        <button class="btn btn-primary" onclick="addQuestionToService('${activeService.id}', 'end')">${getIconSvg('plus')} Add Question</button>
+      </div>
+    `;
+  }
+
   html += `
     <div class="generated-fields-panel generated-fields-panel-end">
       <div>
@@ -934,6 +1074,96 @@ function renderBuilder() {
 
 function setActiveBuilderService(serviceId) {
   state.builder.activeServiceId = serviceId;
+  renderBuilder();
+}
+
+function createStableId(name, existingIds) {
+  const base = String(name || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "category";
+  let candidate = base.slice(0, 70);
+  let suffix = 2;
+  while (existingIds.has(candidate)) {
+    candidate = `${base.slice(0, 65)}-${suffix}`;
+    suffix++;
+  }
+  return candidate;
+}
+
+async function addCategoryFromInput() {
+  const input = document.getElementById("new-category-name");
+  const name = input?.value.trim() || "";
+  if (!name) {
+    showToast("Enter a category name.");
+    input?.focus();
+    return;
+  }
+  if (state.categories.some(category => normalizeName(category.name) === normalizeName(name))) {
+    showToast("A category with this name already exists.");
+    return;
+  }
+  const category = { id: createStableId(name, new Set(state.categories.map(item => item.id))), name };
+  state.categories.push(category);
+  const saved = await saveServicesState();
+  if (!saved) state.categories = state.categories.filter(item => item !== category);
+  renderBuilder();
+  if (saved) showToast("Category added.");
+}
+
+async function updateCategoryName(categoryId, name) {
+  const category = getCategory(categoryId);
+  if (!category) return;
+  const cleanedName = name.trim();
+  if (!cleanedName || state.categories.some(item => item.id !== categoryId && normalizeName(item.name) === normalizeName(cleanedName))) {
+    showToast(cleanedName ? "A category with this name already exists." : "Category name cannot be empty.");
+    renderBuilder();
+    return;
+  }
+  const previousName = category.name;
+  category.name = cleanedName;
+  if (!(await saveServicesState())) category.name = previousName;
+  renderBuilder();
+}
+
+async function deleteCategory(categoryId) {
+  const category = getCategory(categoryId);
+  if (!category || state.categories.length === 1) {
+    showToast("At least one category is required.");
+    return;
+  }
+  const affectedServices = state.services.filter(service => (service.categoryIds || []).includes(categoryId));
+  const warning = affectedServices.length
+    ? `Delete “${category.name}” and remove ${affectedServices.length} ${affectedServices.length === 1 ? 'form' : 'forms'} from it? The forms will not be deleted.`
+    : `Delete the “${category.name}” category?`;
+  if (!window.confirm(warning)) return;
+
+  const previousCategories = state.categories.map(item => ({ ...item }));
+  const previousAssignments = new Map(state.services.map(service => [service.id, [...(service.categoryIds || [])]]));
+  state.categories = state.categories.filter(item => item.id !== categoryId);
+  state.services.forEach(service => {
+    service.categoryIds = (service.categoryIds || []).filter(id => id !== categoryId);
+  });
+  if (!(await saveServicesState())) {
+    state.categories = previousCategories;
+    state.services.forEach(service => { service.categoryIds = previousAssignments.get(service.id) || []; });
+  } else if (state.calculator.categoryFilterId === categoryId) {
+    state.calculator.categoryFilterId = "";
+  }
+  renderBuilder();
+}
+
+async function toggleServiceCategory(serviceId, categoryId, checked) {
+  const service = state.services.find(item => item.id === serviceId);
+  if (!service || !getCategory(categoryId)) return;
+  const previousCategoryIds = [...(service.categoryIds || [])];
+  const nextCategoryIds = new Set(previousCategoryIds);
+  if (checked) nextCategoryIds.add(categoryId);
+  else nextCategoryIds.delete(categoryId);
+  service.categoryIds = [...nextCategoryIds];
+  if (!(await saveServicesState())) service.categoryIds = previousCategoryIds;
   renderBuilder();
 }
 
@@ -977,6 +1207,15 @@ function openCreateServiceModal() {
     form.reset();
     document.getElementById("new-service-basecost").value = "1000";
     document.getElementById("new-service-title")?.setCustomValidity("");
+    const categoryContainer = document.getElementById("new-service-categories");
+    if (categoryContainer) {
+      categoryContainer.innerHTML = state.categories.map((category, index) => `
+        <label class="category-checkbox">
+          <input type="checkbox" value="${escapeHtml(category.id)}" ${category.id === 'residential' || (index === 0 && !state.categories.some(item => item.id === 'residential')) ? 'checked' : ''} />
+          <span>${escapeHtml(category.name)}</span>
+        </label>
+      `).join('');
+    }
     modal.classList.add("active");
     setTimeout(() => {
       initCustomSelects();
@@ -996,6 +1235,7 @@ async function handleCreateServiceSubmit(e) {
   const titleInput = document.getElementById("new-service-title");
   const baseCostInput = document.getElementById("new-service-basecost");
   const iconInput = document.getElementById("new-service-icon");
+  const categoryInputs = document.querySelectorAll("#new-service-categories input[type='checkbox']:checked");
 
   const title = titleInput ? titleInput.value.trim() : "";
   if (!title) return;
@@ -1017,6 +1257,7 @@ async function handleCreateServiceSubmit(e) {
     title: title,
     icon: icon,
     baseCost: baseCost,
+    categoryIds: Array.from(categoryInputs, input => input.value),
     questions: []
   };
   state.services.push(newService);
@@ -1066,7 +1307,7 @@ async function confirmDeleteService() {
   showToast("Service deleted.");
 }
 
-function addQuestionToService(serviceId) {
+function addQuestionToService(serviceId, position) {
   const service = state.services.find(s => s.id === serviceId);
   if (service) {
     const newQId = "q_" + Date.now();
@@ -1076,16 +1317,27 @@ function addQuestionToService(serviceId) {
       questionNumber++;
       questionTitle = `New Question ${questionNumber}`;
     }
-    service.questions.push({
+    const newQuestion = {
       id: newQId,
       title: questionTitle,
       type: "single",
       options: [
-        { label: "Option 1", minPrice: 0, maxPrice: 1000 }
+        { label: "Option 1", minPrice: 0, maxPrice: 0 }
       ]
-    });
+    };
+    if (position === 'start') {
+      service.questions.unshift(newQuestion);
+    } else {
+      service.questions.push(newQuestion);
+    }
     saveServicesState();
     renderBuilder();
+    const titleInput = document.querySelector(`[data-question-id="${newQId}"]`);
+    if (titleInput) {
+      titleInput.focus();
+      titleInput.select();
+      titleInput.scrollIntoView({ block: 'nearest' });
+    }
   }
 }
 
@@ -1153,7 +1405,7 @@ function addOptionToQuestion(serviceId, qId) {
   if (service) {
     const q = service.questions.find(item => item.id === qId);
     if (q) {
-      q.options.push({ label: "New Option", minPrice: 0, maxPrice: 500 });
+      q.options.push({ label: "New Option", minPrice: 0, maxPrice: 0 });
       saveServicesState();
       renderBuilder();
     }
@@ -1183,23 +1435,47 @@ function updateOptionLabel(serviceId, qId, optIndex, val) {
   }
 }
 
-function updateOptionMinPrice(serviceId, qId, optIndex, val) {
+function normalizeOptionPrice(val) {
+  const price = Number.parseFloat(val);
+  if (!Number.isFinite(price)) return 0;
+  return Math.min(100000000, Math.max(0, Math.round(price * 100) / 100));
+}
+
+function updatePairedPriceInput(input, kind, value) {
+  const row = input?.closest(".option-builder-row");
+  const pairedInput = row?.querySelector(`input[data-price-kind="${kind}"]`);
+  if (pairedInput) pairedInput.value = value;
+}
+
+function updateOptionMinPrice(serviceId, qId, optIndex, val, input) {
   const service = state.services.find(s => s.id === serviceId);
   if (service) {
     const q = service.questions.find(item => item.id === qId);
     if (q && q.options[optIndex]) {
-      q.options[optIndex].minPrice = parseFloat(val) || 0;
+      const option = q.options[optIndex];
+      option.minPrice = normalizeOptionPrice(val);
+      if (input) input.value = option.minPrice;
+      if (option.maxPrice < option.minPrice) {
+        option.maxPrice = option.minPrice;
+        updatePairedPriceInput(input, "max", option.maxPrice);
+      }
       saveServicesState();
     }
   }
 }
 
-function updateOptionMaxPrice(serviceId, qId, optIndex, val) {
+function updateOptionMaxPrice(serviceId, qId, optIndex, val, input) {
   const service = state.services.find(s => s.id === serviceId);
   if (service) {
     const q = service.questions.find(item => item.id === qId);
     if (q && q.options[optIndex]) {
-      q.options[optIndex].maxPrice = parseFloat(val) || 0;
+      const option = q.options[optIndex];
+      option.maxPrice = normalizeOptionPrice(val);
+      if (input) input.value = option.maxPrice;
+      if (option.minPrice > option.maxPrice) {
+        option.minPrice = option.maxPrice;
+        updatePairedPriceInput(input, "min", option.minPrice);
+      }
       saveServicesState();
     }
   }
@@ -1464,14 +1740,16 @@ async function testFormWebhook(serviceId) {
    4. EMBED CODE GENERATOR LOGIC
    ============================================================= */
 
-function getEmbedUrl(serviceId = "") {
+function getEmbedUrl(scope = "all") {
   const embedUrl = new URL("/embed", window.location.origin);
-  if (serviceId) embedUrl.searchParams.set("service", serviceId);
+  const [scopeType, scopeId] = String(scope || "all").split(":");
+  if (scopeType === "service" && scopeId) embedUrl.searchParams.set("service", scopeId);
+  if (scopeType === "category" && scopeId) embedUrl.searchParams.set("category", scopeId);
   return embedUrl.toString();
 }
 
-function buildEmbedCode(serviceId = "") {
-  const embedUrl = getEmbedUrl(serviceId);
+function buildEmbedCode(scope = "all") {
+  const embedUrl = getEmbedUrl(scope);
   return `<iframe
   src="${embedUrl}"
   width="100%"
@@ -1480,7 +1758,7 @@ function buildEmbedCode(serviceId = "") {
   title="EstimatorX360 renovation estimator"
   loading="lazy"
   referrerpolicy="no-referrer"
-  sandbox="allow-forms allow-scripts allow-same-origin"
+  sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation"
   scrolling="no"
 ></iframe>
 <script>
@@ -1501,26 +1779,38 @@ function renderEmbedGenerator() {
   const container = document.getElementById("embed-container");
   if (!container) return;
 
-  const iframeCode = buildEmbedCode();
+  const iframeCode = buildEmbedCode("all");
   const allowedOrigins = state.embed.allowedParentOrigins.map(origin => escapeHtml(origin)).join(", ");
   const statusText = state.embed.externalEnabled
     ? `External embedding is enabled for: <strong>${allowedOrigins}</strong>`
     : `External embedding is currently locked. Add the exact published webpage origin to <strong>FRAME_ANCESTORS</strong> in the server's private .env file, then restart the server.`;
+  const categoryOptions = state.categories.map(category =>
+    `<option value="category:${escapeHtml(category.id)}">Category: ${escapeHtml(category.name)}</option>`
+  ).join("");
   const serviceOptions = state.services.map(service =>
-    `<option value="${escapeHtml(service.id)}">${escapeHtml(service.title)}</option>`
+    `<option value="service:${escapeHtml(service.id)}">Form: ${escapeHtml(service.title)}</option>`
   ).join("");
 
   let html = `
     <div class="settings-card">
       <h2 class="section-title">Embed Your Estimator</h2>
-      <p class="section-desc">Generate a secure, responsive embed for all forms or open one service directly.</p>
+      <p class="section-desc">Share or embed all forms, one category, or one individual form.</p>
 
       <div class="form-group" style="margin-bottom: 20px;">
-        <label class="form-label" for="embed-service-select">Form to embed</label>
-        <select class="form-select" id="embed-service-select">
-          <option value="">All service forms</option>
-          ${serviceOptions}
+        <label class="form-label" for="embed-scope-select">Forms to share or embed</label>
+        <select class="form-select" id="embed-scope-select">
+          <option value="all">All forms</option>
+          <optgroup label="Categories">${categoryOptions}</optgroup>
+          <optgroup label="Individual forms">${serviceOptions}</optgroup>
         </select>
+      </div>
+
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label class="form-label">Public share link</label>
+        <div class="share-link-row">
+          <a class="share-link-display" id="share-link-text" href="${escapeHtml(getEmbedUrl('all'))}" target="_blank" rel="noopener noreferrer">${escapeHtml(getEmbedUrl('all'))}</a>
+          <button class="btn btn-secondary" type="button" onclick="copyShareLink()">${getIconSvg('copy')} Copy Share Link</button>
+        </div>
       </div>
 
       <div class="form-group" style="margin-bottom: 20px;">
@@ -1531,7 +1821,7 @@ function renderEmbedGenerator() {
 
       <div class="embed-preview-wrap">
         <div class="form-label">Live preview</div>
-        <iframe id="embed-preview" class="embed-preview" src="${escapeHtml(getEmbedUrl())}" title="Estimator embed preview" sandbox="allow-forms allow-scripts allow-same-origin" scrolling="no"></iframe>
+        <iframe id="embed-preview" class="embed-preview" src="${escapeHtml(getEmbedUrl('all'))}" title="Estimator embed preview" sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation" scrolling="no"></iframe>
       </div>
 
       <div class="info-alert" style="margin-top: 20px;">
@@ -1549,19 +1839,24 @@ function renderEmbedGenerator() {
   `;
 
   container.innerHTML = html;
-  const serviceSelect = document.getElementById("embed-service-select");
-  serviceSelect?.addEventListener("change", () => updateEmbedGenerator(serviceSelect.value));
+  const scopeSelect = document.getElementById("embed-scope-select");
+  scopeSelect?.addEventListener("change", () => updateEmbedGenerator(scopeSelect.value));
   window.removeEventListener("message", handleEmbedPreviewResize);
   window.addEventListener("message", handleEmbedPreviewResize);
 }
 
-function updateEmbedGenerator(serviceId) {
+function updateEmbedGenerator(scope) {
   const codeBlock = document.getElementById("iframe-code-text");
+  const shareLink = document.getElementById("share-link-text");
   const preview = document.getElementById("embed-preview");
-  if (codeBlock) codeBlock.innerText = buildEmbedCode(serviceId);
+  if (codeBlock) codeBlock.innerText = buildEmbedCode(scope);
+  if (shareLink) {
+    shareLink.textContent = getEmbedUrl(scope);
+    shareLink.href = getEmbedUrl(scope);
+  }
   if (preview) {
     preview.style.height = "760px";
-    preview.src = getEmbedUrl(serviceId);
+    preview.src = getEmbedUrl(scope);
   }
 }
 
@@ -1581,6 +1876,342 @@ async function copyEmbedCode() {
   } catch {
     showToast("Clipboard access was blocked. Select and copy the code manually.");
   }
+}
+
+async function copyShareLink() {
+  const link = document.getElementById("share-link-text")?.textContent || "";
+  try {
+    await navigator.clipboard.writeText(link);
+    showToast("Share link copied to clipboard!");
+  } catch {
+    showToast("Clipboard access was blocked. Select and copy the link manually.");
+  }
+}
+
+/* =============================================================
+   5. KILL SWITCH (BILLING CONTROL) LOGIC
+   Two independent locks stand between anyone and this section:
+   the administrator session, and this section's own separate
+   password. Signing in as administrator is not enough by itself.
+   ============================================================= */
+
+async function handleKillSwitchAuthError(response, result, unlocking = false) {
+  let code = result.code;
+  // Older deployments used 401 for both locks. Confirm the admin session before
+  // replacing the panel with a login form; a section lock must not sign the user out.
+  if (response.status === 401 && !code) {
+    const sessionResponse = await fetch("/api/admin/session", {
+      credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }
+    });
+    if (!sessionResponse.ok) throw new Error("Unable to verify your session. Please try again.");
+    const session = await sessionResponse.json();
+    if (session.authenticated === false) code = "ADMIN_AUTH_REQUIRED";
+    else if (session.authenticated === true) code = unlocking ? "KILL_SWITCH_PASSWORD_INVALID" : "KILL_SWITCH_LOCKED";
+    else throw new Error("Unable to verify your session. Please try again.");
+  }
+  if (response.status === 403 && !code && result.error === "Kill switch password required.") {
+    code = "KILL_SWITCH_LOCKED";
+  }
+  if (code === "ADMIN_AUTH_REQUIRED") {
+    state.adminAuthenticated = false;
+    state.killSwitch.unlocked = false;
+    renderAdminGate(document.getElementById("kill-switch-container"), "kill-switch");
+    showToast("Your administrator session expired. Sign in again.");
+    return true;
+  }
+  if (code === "KILL_SWITCH_LOCKED") {
+    state.killSwitch.unlocked = false;
+    renderKillSwitchGate();
+    showToast("Enter the kill switch password to continue.");
+    return true;
+  }
+  return false;
+}
+
+async function renderKillSwitchSettings() {
+  const container = document.getElementById("kill-switch-container");
+  if (!container) return;
+  if (!state.adminAuthenticated) return renderAdminGate(container, "kill-switch");
+
+  container.innerHTML = `<div class="settings-card"><p class="section-desc">Loading kill switch status...</p></div>`;
+  try {
+    const response = await fetch("/api/admin/kill-switch", { headers: { Accept: "application/json" } });
+    const result = await response.json();
+    if (await handleKillSwitchAuthError(response, result)) return;
+    if (!response.ok) throw new Error(result.error || "Unable to load kill switch status.");
+    state.killSwitch.active = result.active !== false;
+    state.killSwitch.message = result.message || "";
+    state.killSwitch.updatedAt = result.updatedAt || "";
+    state.killSwitch.unlocked = true;
+    state.killSwitch.loaded = true;
+    renderEstimatorStatusButton();
+    renderKillSwitchPanel(container);
+  } catch (error) {
+    container.innerHTML = `
+      <div class="settings-card">
+        <div class="info-alert">
+          <div>${getIconSvg('info')}</div>
+          <div>${escapeHtml(error.message)}</div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function renderKillSwitchGate(container = document.getElementById("kill-switch-container")) {
+  if (!container) return;
+  container.innerHTML = `
+    <div class="settings-card kill-switch-gate">
+      <div class="kill-switch-gate-icon">${getIconSvg('lock')}</div>
+      <h2 class="section-title">Kill Switch — Billing Control</h2>
+      <p class="section-desc">This section is locked separately from your administrator login. Enter the kill switch password to view and change whether the public estimator is live.</p>
+      <form class="kill-switch-gate-form" onsubmit="unlockKillSwitch(event)">
+        <div class="form-group">
+          <label class="form-label" for="kill-switch-password-input">Kill Switch Password</label>
+          <input type="password" class="form-input" id="kill-switch-password-input" minlength="16" maxlength="256" autocomplete="off" required />
+        </div>
+        <button class="btn btn-primary kill-switch-gate-submit" type="submit">${getIconSvg('lock')} Unlock Section</button>
+      </form>
+      <p class="kill-switch-gate-note">The section locks itself again after 20 minutes, and whenever you sign out.</p>
+    </div>
+  `;
+  setTimeout(() => document.getElementById("kill-switch-password-input")?.focus(), 40);
+}
+
+function renderKillSwitchPanel(container = document.getElementById("kill-switch-container")) {
+  if (!container) return;
+  if (!state.killSwitch.unlocked) return renderKillSwitchGate(container);
+
+  const isActive = state.killSwitch.active;
+  const updatedLabel = formatKillSwitchTimestamp(state.killSwitch.updatedAt);
+
+  container.innerHTML = `
+    <div class="settings-card">
+      <div class="builder-header kill-switch-header">
+        <div class="kill-switch-header-text">
+          <h2 class="section-title">Kill Switch — Billing Control</h2>
+          <p class="section-desc">Pause every EstimatorX360 embed at once — the main <code>/embed</code> page and every category or single-form link built from it — then resume them the moment an account is settled.</p>
+        </div>
+        <button class="btn btn-secondary" type="button" onclick="lockKillSwitchSection()">${getIconSvg('lock')} Lock Section</button>
+      </div>
+
+      <div class="kill-switch-status-card ${isActive ? 'is-active' : 'is-paused'}">
+        <div class="kill-switch-status-info">
+          <span class="kill-switch-status-dot"></span>
+          <div class="kill-switch-status-text">
+            <h3>${isActive ? 'Estimator is live' : 'Estimator is paused'}</h3>
+            <p>${isActive
+              ? 'Every embed link is loading the calculator normally.'
+              : 'Every embed link is showing your unavailable notice instead of the calculator.'}</p>
+            ${updatedLabel ? `<span class="kill-switch-status-meta">Last changed ${escapeHtml(updatedLabel)}</span>` : ''}
+          </div>
+        </div>
+        <button class="btn ${isActive ? 'btn-danger' : 'btn-primary'} kill-switch-toggle-btn" type="button" onclick="confirmKillSwitchToggle(${isActive ? 'false' : 'true'})">
+          ${getIconSvg('power')} ${isActive ? 'Turn Estimator OFF' : 'Turn Estimator ON'}
+        </button>
+      </div>
+
+      <div class="kill-switch-block">
+        <h3 class="kill-switch-block-title">Message shown to visitors while paused</h3>
+        <p class="generated-fields-help">Displayed on every <code>/embed</code> link in place of the calculator. Leave it blank to use the default notice.</p>
+        <div class="form-group kill-switch-message-field">
+          <textarea class="form-textarea" id="kill-switch-message-input" rows="3" maxlength="400" placeholder="This estimator is temporarily unavailable. Please check back soon or contact us directly.">${escapeHtml(state.killSwitch.message)}</textarea>
+        </div>
+        <div class="kill-switch-block-actions">
+          <button class="btn btn-secondary" type="button" onclick="saveKillSwitchMessage()">Save Message</button>
+        </div>
+      </div>
+
+      <div class="info-alert kill-switch-note">
+        <div>${getIconSvg('info')}</div>
+        <div>While paused, all embed links and previews are blocked, including for signed-in administrators. Estimate submissions are refused as well. You stay signed in and can still edit forms or turn the estimator back on.</div>
+      </div>
+    </div>
+  `;
+}
+
+function formatKillSwitchTimestamp(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString(CURRENCY_LOCALE, {
+    year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit"
+  });
+}
+
+async function unlockKillSwitch(event) {
+  event.preventDefault();
+  const input = document.getElementById("kill-switch-password-input");
+  try {
+    const response = await fetch("/api/admin/kill-switch/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ password: input.value })
+    });
+    const result = await response.json();
+    if (input) input.value = "";
+    if (await handleKillSwitchAuthError(response, result, true)) return;
+    if (!response.ok) throw new Error(result.error || "Incorrect kill switch password.");
+    state.killSwitch.unlocked = true;
+    showToast("Kill switch section unlocked.");
+    // Re-read from the server rather than trusting this flag: the panel's contents come
+    // back only if the server accepts the unlock cookie it just issued.
+    await renderKillSwitchSettings();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function lockKillSwitchSection() {
+  try {
+    await fetch("/api/admin/kill-switch/lock", { method: "POST" });
+  } catch (error) {
+    console.error("Kill switch lock failed:", error.message);
+  }
+  state.killSwitch.unlocked = false;
+  state.killSwitch.message = "";
+  state.killSwitch.updatedAt = "";
+  showToast("Kill switch section locked.");
+  renderKillSwitchGate();
+}
+
+let pendingKillSwitchConfirm = null;
+
+function openKillSwitchConfirm({ heading, body, confirmLabel, danger, onConfirm }) {
+  const modal = document.getElementById("kill-switch-confirm-modal");
+  const headingElement = document.getElementById("kill-switch-confirm-heading");
+  const iconElement = document.getElementById("kill-switch-confirm-icon");
+  const bodyElement = document.getElementById("kill-switch-confirm-body");
+  const acceptButton = document.getElementById("kill-switch-confirm-accept");
+  if (!modal || !headingElement || !bodyElement || !acceptButton) {
+    // The modal markup is missing; never silently perform a destructive action instead.
+    showToast("Confirmation dialog is unavailable. Reload the dashboard and try again.");
+    return;
+  }
+
+  pendingKillSwitchConfirm = onConfirm;
+  headingElement.textContent = heading;
+  bodyElement.textContent = body;
+  acceptButton.textContent = confirmLabel;
+  acceptButton.className = `btn ${danger ? "btn-danger" : "btn-primary"}`;
+  if (iconElement) iconElement.innerHTML = getIconSvg("power");
+  iconElement?.classList.toggle("is-danger", Boolean(danger));
+  modal.classList.add("active");
+  setTimeout(() => acceptButton.focus(), 40);
+}
+
+function closeKillSwitchConfirm() {
+  pendingKillSwitchConfirm = null;
+  document.getElementById("kill-switch-confirm-modal")?.classList.remove("active");
+}
+
+function acceptKillSwitchConfirm() {
+  const action = pendingKillSwitchConfirm;
+  closeKillSwitchConfirm();
+  if (typeof action === "function") action();
+}
+
+function confirmKillSwitchToggle(active) {
+  openKillSwitchConfirm({
+    heading: active ? "Turn the estimator back on?" : "Turn the estimator off?",
+    body: active
+      ? "Every embed link starts working again immediately — the main embed page and every category or single-form link."
+      : "Every embed link — the main embed page and every category or single-form link — will immediately show your unavailable notice instead of the calculator, and estimate submissions will stop, until you turn it back on.",
+    confirmLabel: active ? "Turn Estimator ON" : "Turn Estimator OFF",
+    danger: !active,
+    onConfirm: () => setKillSwitchActive(active)
+  });
+}
+
+async function setKillSwitchActive(active) {
+  const messageInput = document.getElementById("kill-switch-message-input");
+  const message = messageInput ? messageInput.value : state.killSwitch.message;
+  await pushKillSwitchUpdate(active, message, active ? "Estimator turned ON. Embeds are live again." : "Estimator turned OFF. Embeds now show the unavailable notice.");
+}
+
+async function saveKillSwitchMessage() {
+  const messageInput = document.getElementById("kill-switch-message-input");
+  const message = messageInput ? messageInput.value : "";
+  await pushKillSwitchUpdate(state.killSwitch.active, message, "Message saved.");
+}
+
+async function pushKillSwitchUpdate(active, message, successText) {
+  try {
+    const response = await fetch("/api/admin/kill-switch", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ active, message })
+    });
+    const result = await response.json();
+    if (await handleKillSwitchAuthError(response, result)) return;
+    if (!response.ok) throw new Error(result.error || "Unable to update the kill switch.");
+    state.killSwitch.active = result.active !== false;
+    state.killSwitch.message = result.message || "";
+    state.killSwitch.updatedAt = result.updatedAt || "";
+    state.killSwitch.loaded = true;
+    showToast(successText);
+    renderEstimatorStatusButton();
+    renderKillSwitchPanel();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function setupEmbedAvailabilityMonitoring() {
+  let checking = false;
+  let blocked = false;
+  const check = async () => {
+    if (checking) return;
+    checking = true;
+    try {
+      const response = await fetch("/api/embed/config", {
+        credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(10000),
+        headers: { Accept: "application/json" }
+      });
+      if (!response.ok) throw new Error("Unable to verify estimator availability.");
+      const status = await response.json();
+      if (status.estimatorActive !== true) {
+        showUnavailable(status.message);
+      } else if (blocked) {
+        // Reload the selected category/service from the server after access resumes.
+        window.location.reload();
+      }
+    } catch {
+      showUnavailable();
+    } finally {
+      checking = false;
+    }
+  };
+  const showUnavailable = message => {
+    blocked = true;
+    const dashboard = document.getElementById("dashboardApp");
+    if (dashboard) dashboard.style.display = "none";
+    document.querySelectorAll(".modal-overlay").forEach(modal => { modal.style.display = "none"; });
+    let notice = document.getElementById("embed-unavailable-notice");
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.id = "embed-unavailable-notice";
+      notice.className = "settings-card";
+      notice.setAttribute("role", "status");
+      document.body.appendChild(notice);
+    }
+    notice.textContent = message || "This estimator is temporarily unavailable. Please check back soon or contact us directly.";
+    const websiteLink = document.createElement("a");
+    websiteLink.href = "https://automatex360.com";
+    websiteLink.target = "_top";
+    websiteLink.rel = "noreferrer";
+    websiteLink.className = "unavailable-website-link";
+    websiteLink.textContent = "Visit AutomateX360 →";
+    notice.appendChild(websiteLink);
+    window.parent.postMessage({ type: "automatex360:resize", height: 300 }, "*");
+  };
+  check();
+  // An already-open iframe must notice a pause without waiting for a page refresh.
+  setInterval(check, 15000);
+  window.addEventListener("pageshow", check);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) check();
+  });
 }
 
 function setupEmbeddedHeightMessaging() {
