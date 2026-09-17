@@ -1,6 +1,6 @@
-# AutomateX360 — GoHighLevel (GHL) Estimator & Calculator
+# EstimatorX360 — GoHighLevel (GHL) Estimator & Calculator
 
-**AutomateX360** is an interactive, customizable calculator and form builder designed specifically for GoHighLevel (GHL) users, home renovators, contractors, and service businesses.
+**EstimatorX360** is an interactive, customizable calculator and form builder designed specifically for GoHighLevel (GHL) users, home renovators, contractors, and service businesses.
 
 It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CAD $80,000**) for each answer option, calculate real-time running estimates step-by-step for prospective clients, and transmit lead details + complete itemized breakdown directly into **GoHighLevel** via Webhooks. All prices and estimates are Canadian dollars (CAD).
 
@@ -77,7 +77,7 @@ Saved webhook URLs are stored in a separate server-only Firestore collection. Th
 
 ### Step 3: Authorize and embed the calculator
 1. Set `FRAME_ANCESTORS` in the private `.env` file if adding custom domains (by default, `self`, `http://localhost:*`, `http://127.0.0.1:*`, `https://bridgelandbuilders.com`, and `https://*.bridgelandbuilders.com` are allowed).
-2. Open the **Embed Generator** tab in AutomateX360.
+2. Open the **Embed Generator** tab in EstimatorX360.
 3. Choose **All forms**, one category, or one specific form.
 4. Use **Copy Share Link** for a standalone public calculator URL, or **Copy Embed Code** for an iframe.
 5. In GHL Page Builder, drag a **Custom Code / HTML** element onto your landing page.
@@ -86,7 +86,6 @@ Saved webhook URLs are stored in a separate server-only Firestore collection. Th
 The generated `/embed` page contains only the public calculator. It excludes the navigation, form builder, webhook settings, and administrator session lookup. Its resize message contains only a numeric height, and the generated parent script verifies both the iframe window and its origin before resizing. The main dashboard cannot be framed by external sites.
 
 ### Private dashboard and public form links
-
 The root URL redirects unauthenticated visitors to `/login`. The dashboard routes (`/app` and `/index.html`) are enforced by the server and require the signed administrator session cookie. This is not a client-side visibility toggle: without a valid session, the dashboard HTML is never served.
 
 Public recipients use the links produced by the Embed Generator. `/embed` exposes all forms, `/embed?category=...` exposes one category, and `/embed?service=...` opens one form directly. These public routes intentionally contain no dashboard navigation or administrator controls.
