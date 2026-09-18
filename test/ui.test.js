@@ -94,3 +94,11 @@ test('tab logo favicons are present and referenced in dashboard and login pages'
   assert.ok(fs.existsSync(path.join(root, 'favicon.svg')));
   assert.ok(fs.existsSync(path.join(root, 'favicon.ico')));
 });
+
+test('estimate breakdown modal links to Book On-Site Visit', () => {
+  const dashboard = fs.readFileSync(path.join(root, 'dashboard.html'), 'utf8');
+  assert.match(
+    dashboard,
+    /<a[^>]*href="https:\/\/bridgelandbuilders\.com\/book-online"[^>]*target="_blank"[^>]*>Book On-Site Visit<\/a>/
+  );
+});
