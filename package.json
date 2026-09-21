@@ -1,8 +1,8 @@
 {
-  "name": "estimatorx360",
+  "name": "priceguidex360",
   "version": "1.0.0",
   "private": true,
-  "description": "Secure price estimator and admin builder",
+  "description": "Secure price guide and admin builder",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

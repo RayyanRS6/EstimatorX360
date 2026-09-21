@@ -247,10 +247,10 @@ function renderEstimatorStatusButton() {
   const label = document.getElementById("estimator-status-label");
   if (!button || !label) return;
   const status = !state.killSwitch.loaded ? "unknown" : state.killSwitch.active ? "live" : "paused";
-  const text = status === "unknown" ? "Estimator status" : `Estimator ${status}`;
+  const text = status === "unknown" ? "Price Guide status" : `Price Guide ${status}`;
   button.dataset.status = status;
   label.textContent = text;
-  button.setAttribute("aria-label", `${text}. Manage estimator availability`);
+  button.setAttribute("aria-label", `${text}. Manage Price Guide availability`);
   button.title = `${text} — Manage`;
 }
 
@@ -437,11 +437,19 @@ function renderView() {
 }
 
 /* =============================================================
-   1. LIVE ESTIMATOR (CALCULATOR WIZARD) LOGIC
+   1. LIVE PRICE GUIDE (CALCULATOR WIZARD) LOGIC
    ============================================================= */
 
+// A form switched off in the builder disappears from every price guide surface: the public
+// embed, every category or single-form embed link, and the dashboard's own live preview.
+// The builder itself still lists it so it can be edited and switched back on.
+function isServiceEnabled(service) {
+  return service?.enabled !== false;
+}
+
 function getSelectedService() {
-  return state.services.find(s => s.id === state.calculator.selectedServiceId);
+  const service = state.services.find(s => s.id === state.calculator.selectedServiceId);
+  return isServiceEnabled(service) ? service : undefined;
 }
 
 function getCategory(categoryId) {
@@ -456,8 +464,9 @@ function getServiceCategoryNames(service) {
 
 function getVisibleCalculatorServices() {
   const categoryId = requestedEmbedCategoryId || state.calculator.categoryFilterId;
-  if (!categoryId) return state.services;
-  return state.services.filter(service => (service.categoryIds || []).includes(categoryId));
+  const publishedServices = state.services.filter(isServiceEnabled);
+  if (!categoryId) return publishedServices;
+  return publishedServices.filter(service => (service.categoryIds || []).includes(categoryId));
 }
 
 function selectCalculatorCategory(categoryId) {
@@ -508,7 +517,7 @@ function getBrandFooterHtml() {
   return `
     <div class="calculator-brand-footer">
       <a href="https://automatex360.com" target="_blank" rel="noopener noreferrer" class="powered-by-footer-link" title="Visit AutomateX360.com">
-        <span>EstimatorX360</span>
+        <span>PriceGuideX360</span>
         <span class="footer-divider">•</span>
         <span>Powered By <strong>AutomateX360</strong></span>
       </a>
@@ -534,6 +543,15 @@ function renderCalculator() {
     if (tickerBar) tickerBar.style.display = "none";
     if (progressBarContainer) progressBarContainer.style.display = "none";
     if (progressBar) progressBar.style.width = "0%";
+
+    // A single-form embed link whose form has been switched off must say so rather than
+    // fall back to a grid of every other form the visitor was never sent to.
+    if (requestedEmbedServiceId && !state.services.some(item => item.id === requestedEmbedServiceId && isServiceEnabled(item))) {
+      calcBody.innerHTML = `
+        <div class="empty-category-state">This form is currently unavailable. Please check back soon or contact us directly.</div>
+      ` + getBrandFooterHtml();
+      return;
+    }
 
     const visibleServices = getVisibleCalculatorServices();
     const fixedCategory = requestedEmbedCategoryId ? getCategory(requestedEmbedCategoryId) : null;
@@ -566,9 +584,12 @@ function renderCalculator() {
       `;
     });
 
+    const activeCategoryId = requestedEmbedCategoryId || state.calculator.categoryFilterId;
     html += visibleServices.length
       ? `</div>`
-      : `</div><div class="empty-category-state">No forms are currently assigned to this category.</div>`;
+      : `</div><div class="empty-category-state">${activeCategoryId
+          ? 'No forms are currently available in this category.'
+          : 'No forms are currently available. Please check back soon or contact us directly.'}</div>`;
     calcBody.innerHTML = html + getBrandFooterHtml();
     return;
   }
@@ -683,6 +704,7 @@ function renderCalculator() {
 }
 
 function selectServiceForCalc(serviceId) {
+  if (!state.services.some(service => service.id === serviceId && isServiceEnabled(service))) return;
   state.calculator.selectedServiceId = serviceId;
   state.calculator.currentStep = 1;
   state.calculator.answers = {};
@@ -723,6 +745,8 @@ function prevCalcStep() {
 
 function nextCalcStep() {
   const service = getSelectedService();
+  // The form can be switched off while a preview or embed is mid-wizard.
+  if (!service) return renderCalculator();
   const totalQuestions = service.questions.length;
   if (state.calculator.currentStep <= totalQuestions) {
     state.calculator.currentStep++;
@@ -739,6 +763,11 @@ async function handleLeadSubmit(e) {
   state.calculator.lead.notes = document.getElementById("lead-notes").value;
 
   const service = getSelectedService();
+  if (!service) {
+    showToast("This form is currently unavailable.");
+    renderCalculator();
+    return;
+  }
   const { minTotal, maxTotal, breakdown } = calculateEstimate();
 
   const payload = {
@@ -868,7 +897,7 @@ function renderBuilder() {
   let html = `
     <div class="builder-header">
       <div>
-        <h2 class="section-title">EstimatorX360 Form Builder</h2>
+        <h2 class="section-title">PriceGuideX360 Form Builder</h2>
         <p class="section-desc">Organize forms into categories, configure starting costs, edit questions, and set Min/Max price ranges.</p>
       </div>
       <div style="display: flex; gap: 10px;">
@@ -906,10 +935,12 @@ function renderBuilder() {
 
   state.services.forEach(s => {
     const isActive = s.id === state.builder.activeServiceId;
+    const enabled = isServiceEnabled(s);
     html += `
-      <button class="service-tab-btn ${isActive ? 'active' : ''}" onclick="setActiveBuilderService('${s.id}')">
+      <button class="service-tab-btn ${isActive ? 'active' : ''} ${enabled ? '' : 'is-disabled'}" onclick="setActiveBuilderService('${s.id}')" title="${enabled ? '' : 'This form is switched off and hidden from every public link'}">
         ${getIconSvg(s.icon || s.id || s.title)}
         <span>${escapeHtml(s.title)}</span>
+        ${enabled ? '' : '<span class="service-tab-status">Off</span>'}
       </button>
     `;
   });
@@ -923,8 +954,15 @@ function renderBuilder() {
   }
 
   // Active Service Editor Card
+  const activeServiceEnabled = isServiceEnabled(activeService);
   html += `
     <div class="service-edit-card">
+      ${activeServiceEnabled ? '' : `
+        <div class="service-disabled-banner" role="status">
+          <div>${getIconSvg('info')}</div>
+          <div><strong>This form is switched off.</strong> It is hidden from the public price guide, every embed and share link, and the live preview. Nobody can open or submit it until you switch it back on.</div>
+        </div>
+      `}
       <div class="service-meta-row">
         <div class="form-group">
           <label class="form-label">Service Title</label>
@@ -945,7 +983,16 @@ function renderBuilder() {
             </div>
           </div>
         </div>
-        <div></div>
+        <div class="form-group">
+          <label class="form-label" for="service-enabled-toggle">Form status</label>
+          <div class="service-status-control">
+            <label class="form-switch">
+              <input type="checkbox" id="service-enabled-toggle" ${activeServiceEnabled ? 'checked' : ''} onchange="toggleServiceEnabled('${activeService.id}', this.checked)" />
+              <span class="form-switch-track" aria-hidden="true"><span class="form-switch-thumb"></span></span>
+            </label>
+            <span class="service-status-label ${activeServiceEnabled ? 'is-live' : 'is-off'}">${activeServiceEnabled ? 'Live' : 'Disabled'}</span>
+          </div>
+        </div>
         <div>
           <button class="btn btn-danger" onclick="deleteService('${activeService.id}')">${getIconSvg('trash')} Delete Service</button>
         </div>
@@ -1186,6 +1233,21 @@ async function updateServiceTitle(serviceId, title) {
   }
 }
 
+async function toggleServiceEnabled(serviceId, enabled) {
+  const service = state.services.find(s => s.id === serviceId);
+  if (!service) return;
+  const previousEnabled = isServiceEnabled(service);
+  service.enabled = Boolean(enabled);
+  const saved = await saveServicesState();
+  if (!saved) service.enabled = previousEnabled;
+  renderBuilder();
+  if (saved) {
+    showToast(service.enabled
+      ? `“${service.title}” is live again.`
+      : `“${service.title}” is switched off and hidden from every public link.`);
+  }
+}
+
 function updateServiceBaseCost(serviceId, val) {
   const service = state.services.find(s => s.id === serviceId);
   if (service) {
@@ -1257,6 +1319,7 @@ async function handleCreateServiceSubmit(e) {
     title: title,
     icon: icon,
     baseCost: baseCost,
+    enabled: true,
     categoryIds: Array.from(categoryInputs, input => input.value),
     questions: []
   };
@@ -1619,7 +1682,7 @@ function renderWebhookManager(container = document.getElementById("webhook-conta
         ? "Stored configuration is invalid — replace it"
         : "Not configured";
   const serviceOptions = state.services.map(item =>
-    `<option value="${escapeHtml(item.id)}" ${item.id === service.id ? "selected" : ""}>${escapeHtml(item.title)}</option>`
+    `<option value="${escapeHtml(item.id)}" ${item.id === service.id ? "selected" : ""}>${escapeHtml(item.title)}${isServiceEnabled(item) ? '' : ' (disabled)'}</option>`
   ).join("");
   const mappingText = service.questions.map(question =>
     `${service.title}: ${question.title}\nAnswer value: answer_fields.${getAnswerFieldKey(question.title)}`
@@ -1646,6 +1709,7 @@ function renderWebhookManager(container = document.getElementById("webhook-conta
           <div>
             <h3>${escapeHtml(service.title)}</h3>
             <span class="webhook-status ${status.configured ? 'configured' : 'missing'}">${escapeHtml(statusLabel)}</span>
+            ${isServiceEnabled(service) ? '' : '<span class="webhook-status missing">Form disabled — not accepting public submissions</span>'}
           </div>
         </div>
         <div class="form-group">
@@ -1755,7 +1819,7 @@ function buildEmbedCode(scope = "all") {
   width="100%"
   height="760"
   style="display:block;width:100%;min-height:500px;border:0;outline:0;border-radius:20px;overflow:hidden;box-shadow:0 16px 42px rgba(18,19,22,0.14);"
-  title="EstimatorX360 renovation estimator"
+  title="PriceGuideX360 renovation price guide"
   loading="lazy"
   referrerpolicy="no-referrer"
   sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation"
@@ -1788,12 +1852,12 @@ function renderEmbedGenerator() {
     `<option value="category:${escapeHtml(category.id)}">Category: ${escapeHtml(category.name)}</option>`
   ).join("");
   const serviceOptions = state.services.map(service =>
-    `<option value="service:${escapeHtml(service.id)}">Form: ${escapeHtml(service.title)}</option>`
+    `<option value="service:${escapeHtml(service.id)}">Form: ${escapeHtml(service.title)}${isServiceEnabled(service) ? '' : ' (disabled)'}</option>`
   ).join("");
 
   let html = `
     <div class="settings-card">
-      <h2 class="section-title">Embed Your Estimator</h2>
+      <h2 class="section-title">Embed Your Price Guide</h2>
       <p class="section-desc">Share or embed all forms, one category, or one individual form.</p>
 
       <div class="form-group" style="margin-bottom: 20px;">
@@ -1803,6 +1867,7 @@ function renderEmbedGenerator() {
           <optgroup label="Categories">${categoryOptions}</optgroup>
           <optgroup label="Individual forms">${serviceOptions}</optgroup>
         </select>
+        <p class="embed-scope-warning" id="embed-scope-warning" role="status" hidden></p>
       </div>
 
       <div class="form-group" style="margin-bottom: 20px;">
@@ -1821,7 +1886,7 @@ function renderEmbedGenerator() {
 
       <div class="embed-preview-wrap">
         <div class="form-label">Live preview</div>
-        <iframe id="embed-preview" class="embed-preview" src="${escapeHtml(getEmbedUrl('all'))}" title="Estimator embed preview" sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation" scrolling="no"></iframe>
+        <iframe id="embed-preview" class="embed-preview" src="${escapeHtml(getEmbedUrl('all'))}" title="Price Guide embed preview" sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation" scrolling="no"></iframe>
       </div>
 
       <div class="info-alert" style="margin-top: 20px;">
@@ -1841,14 +1906,47 @@ function renderEmbedGenerator() {
   container.innerHTML = html;
   const scopeSelect = document.getElementById("embed-scope-select");
   scopeSelect?.addEventListener("change", () => updateEmbedGenerator(scopeSelect.value));
+  updateEmbedScopeWarning("all");
   window.removeEventListener("message", handleEmbedPreviewResize);
   window.addEventListener("message", handleEmbedPreviewResize);
+}
+
+// The generator keeps offering links for switched-off forms, because the link itself stays
+// valid; it just says plainly that nothing will be shown until the form is switched on.
+function getEmbedScopeWarning(scope) {
+  const [scopeType, scopeId] = String(scope || "all").split(":");
+  if (scopeType === "service" && scopeId) {
+    const service = state.services.find(item => item.id === scopeId);
+    if (service && !isServiceEnabled(service)) {
+      return `“${service.title}” is switched off. This link and embed code show an unavailable notice until you switch the form back on in the Form Builder.`;
+    }
+    return "";
+  }
+  if (scopeType === "category" && scopeId) {
+    const published = state.services.filter(item => isServiceEnabled(item) && (item.categoryIds || []).includes(scopeId));
+    if (!published.length) {
+      return "Every form in this category is switched off, so this link shows no forms until you switch at least one back on.";
+    }
+    return "";
+  }
+  return state.services.some(isServiceEnabled)
+    ? ""
+    : "Every form is switched off, so this link shows no forms until you switch at least one back on.";
+}
+
+function updateEmbedScopeWarning(scope) {
+  const warning = document.getElementById("embed-scope-warning");
+  if (!warning) return;
+  const message = getEmbedScopeWarning(scope);
+  warning.textContent = message;
+  warning.hidden = !message;
 }
 
 function updateEmbedGenerator(scope) {
   const codeBlock = document.getElementById("iframe-code-text");
   const shareLink = document.getElementById("share-link-text");
   const preview = document.getElementById("embed-preview");
+  updateEmbedScopeWarning(scope);
   if (codeBlock) codeBlock.innerText = buildEmbedCode(scope);
   if (shareLink) {
     shareLink.textContent = getEmbedUrl(scope);
@@ -1964,7 +2062,7 @@ function renderKillSwitchGate(container = document.getElementById("kill-switch-c
     <div class="settings-card kill-switch-gate">
       <div class="kill-switch-gate-icon">${getIconSvg('lock')}</div>
       <h2 class="section-title">Kill Switch — Billing Control</h2>
-      <p class="section-desc">This section is locked separately from your administrator login. Enter the kill switch password to view and change whether the public estimator is live.</p>
+      <p class="section-desc">This section is locked separately from your administrator login. Enter the kill switch password to view and change whether the public price guide is live.</p>
       <form class="kill-switch-gate-form" onsubmit="unlockKillSwitch(event)">
         <div class="form-group">
           <label class="form-label" for="kill-switch-password-input">Kill Switch Password</label>
@@ -1990,7 +2088,7 @@ function renderKillSwitchPanel(container = document.getElementById("kill-switch-
       <div class="builder-header kill-switch-header">
         <div class="kill-switch-header-text">
           <h2 class="section-title">Kill Switch — Billing Control</h2>
-          <p class="section-desc">Pause every EstimatorX360 embed at once — the main <code>/embed</code> page and every category or single-form link built from it — then resume them the moment an account is settled.</p>
+          <p class="section-desc">Pause every PriceGuideX360 embed at once — the main <code>/embed</code> page and every category or single-form link built from it — then resume them the moment an account is settled.</p>
         </div>
         <button class="btn btn-secondary" type="button" onclick="lockKillSwitchSection()">${getIconSvg('lock')} Lock Section</button>
       </div>
@@ -1999,7 +2097,7 @@ function renderKillSwitchPanel(container = document.getElementById("kill-switch-
         <div class="kill-switch-status-info">
           <span class="kill-switch-status-dot"></span>
           <div class="kill-switch-status-text">
-            <h3>${isActive ? 'Estimator is live' : 'Estimator is paused'}</h3>
+            <h3>${isActive ? 'Price Guide is live' : 'Price Guide is paused'}</h3>
             <p>${isActive
               ? 'Every embed link is loading the calculator normally.'
               : 'Every embed link is showing your unavailable notice instead of the calculator.'}</p>
@@ -2007,7 +2105,7 @@ function renderKillSwitchPanel(container = document.getElementById("kill-switch-
           </div>
         </div>
         <button class="btn ${isActive ? 'btn-danger' : 'btn-primary'} kill-switch-toggle-btn" type="button" onclick="confirmKillSwitchToggle(${isActive ? 'false' : 'true'})">
-          ${getIconSvg('power')} ${isActive ? 'Turn Estimator OFF' : 'Turn Estimator ON'}
+          ${getIconSvg('power')} ${isActive ? 'Turn Price Guide OFF' : 'Turn Price Guide ON'}
         </button>
       </div>
 
@@ -2015,7 +2113,7 @@ function renderKillSwitchPanel(container = document.getElementById("kill-switch-
         <h3 class="kill-switch-block-title">Message shown to visitors while paused</h3>
         <p class="generated-fields-help">Displayed on every <code>/embed</code> link in place of the calculator. Leave it blank to use the default notice.</p>
         <div class="form-group kill-switch-message-field">
-          <textarea class="form-textarea" id="kill-switch-message-input" rows="3" maxlength="400" placeholder="This estimator is temporarily unavailable. Please check back soon or contact us directly.">${escapeHtml(state.killSwitch.message)}</textarea>
+          <textarea class="form-textarea" id="kill-switch-message-input" rows="3" maxlength="400" placeholder="This price guide is temporarily unavailable. Please check back soon or contact us directly.">${escapeHtml(state.killSwitch.message)}</textarea>
         </div>
         <div class="kill-switch-block-actions">
           <button class="btn btn-secondary" type="button" onclick="saveKillSwitchMessage()">Save Message</button>
@@ -2024,7 +2122,7 @@ function renderKillSwitchPanel(container = document.getElementById("kill-switch-
 
       <div class="info-alert kill-switch-note">
         <div>${getIconSvg('info')}</div>
-        <div>While paused, all embed links and previews are blocked, including for signed-in administrators. Estimate submissions are refused as well. You stay signed in and can still edit forms or turn the estimator back on.</div>
+        <div>While paused, all embed links and previews are blocked, including for signed-in administrators. Estimate submissions are refused as well. You stay signed in and can still edit forms or turn the price guide back on.</div>
       </div>
     </div>
   `;
@@ -2113,11 +2211,11 @@ function acceptKillSwitchConfirm() {
 
 function confirmKillSwitchToggle(active) {
   openKillSwitchConfirm({
-    heading: active ? "Turn the estimator back on?" : "Turn the estimator off?",
+    heading: active ? "Turn the Price Guide back on?" : "Turn the Price Guide off?",
     body: active
       ? "Every embed link starts working again immediately — the main embed page and every category or single-form link."
       : "Every embed link — the main embed page and every category or single-form link — will immediately show your unavailable notice instead of the calculator, and estimate submissions will stop, until you turn it back on.",
-    confirmLabel: active ? "Turn Estimator ON" : "Turn Estimator OFF",
+    confirmLabel: active ? "Turn Price Guide ON" : "Turn Price Guide OFF",
     danger: !active,
     onConfirm: () => setKillSwitchActive(active)
   });
@@ -2126,7 +2224,7 @@ function confirmKillSwitchToggle(active) {
 async function setKillSwitchActive(active) {
   const messageInput = document.getElementById("kill-switch-message-input");
   const message = messageInput ? messageInput.value : state.killSwitch.message;
-  await pushKillSwitchUpdate(active, message, active ? "Estimator turned ON. Embeds are live again." : "Estimator turned OFF. Embeds now show the unavailable notice.");
+  await pushKillSwitchUpdate(active, message, active ? "Price Guide turned ON. Embeds are live again." : "Price Guide turned OFF. Embeds now show the unavailable notice.");
 }
 
 async function saveKillSwitchMessage() {
@@ -2168,7 +2266,7 @@ function setupEmbedAvailabilityMonitoring() {
         credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(10000),
         headers: { Accept: "application/json" }
       });
-      if (!response.ok) throw new Error("Unable to verify estimator availability.");
+      if (!response.ok) throw new Error("Unable to verify price guide availability.");
       const status = await response.json();
       if (status.estimatorActive !== true) {
         showUnavailable(status.message);
@@ -2195,7 +2293,7 @@ function setupEmbedAvailabilityMonitoring() {
       notice.setAttribute("role", "status");
       document.body.appendChild(notice);
     }
-    notice.textContent = message || "This estimator is temporarily unavailable. Please check back soon or contact us directly.";
+    notice.textContent = message || "This price guide is temporarily unavailable. Please check back soon or contact us directly.";
     const websiteLink = document.createElement("a");
     websiteLink.href = "https://automatex360.com";
     websiteLink.target = "_top";

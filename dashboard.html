@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EstimatorX360 — Powered By AutomateX360</title>
+  <title>PriceGuideX360 — Powered By AutomateX360</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="alternate icon" href="/favicon.ico">
   <!-- Google Fonts: DM Sans -->
@@ -38,7 +38,7 @@
       </div>
 
       <div class="sidebar-group">
-        <button class="icon-btn sidebar-nav-btn active" data-view="calculator" title="Live Estimator">
+        <button class="icon-btn sidebar-nav-btn active" data-view="calculator" title="Live Price Guide">
           <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <rect x="3" y="3" width="7" height="7" rx="2"/>
             <rect x="14" y="3" width="7" height="7" rx="2"/>
@@ -94,13 +94,13 @@
             </svg>
           </div>
           <div class="brand-logo-text-group">
-            <span class="brand-title">EstimatorX360</span>
+            <span class="brand-title">PriceGuideX360</span>
             <span class="brand-subtitle">Powered By <strong>AutomateX360</strong></span>
           </div>
         </a>
 
         <div class="nav-pill-menu">
-          <button class="nav-link active" data-view="calculator">Live Estimator</button>
+          <button class="nav-link active" data-view="calculator">Live Price Guide</button>
           <button class="nav-link" data-view="builder">Form & Price Builder</button>
           <button class="nav-link" data-view="webhook">GHL Webhook</button>
           <button class="nav-link" data-view="embed">Embed Generator</button>
@@ -120,12 +120,12 @@
             <span class="notification-dot"></span>
           </button>
 
-          <button type="button" id="estimator-status-button" class="profile-pill estimator-status-button" data-status="unknown" onclick="switchView('kill-switch')" aria-label="Manage estimator availability" title="Manage estimator availability">
+          <button type="button" id="estimator-status-button" class="profile-pill estimator-status-button" data-status="unknown" onclick="switchView('kill-switch')" aria-label="Manage Price Guide availability" title="Manage Price Guide availability">
             <span class="profile-avatar-icon" aria-hidden="true">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
             </span>
             <span class="profile-info">
-              <span class="profile-name" id="estimator-status-label" aria-live="polite">Checking estimator…</span>
+              <span class="profile-name" id="estimator-status-label" aria-live="polite">Checking Price Guide…</span>
               <span class="profile-email">Manage</span>
             </span>
             <span class="profile-arrow" aria-hidden="true">↗</span>
@@ -136,7 +136,7 @@
       <!-- PAGE GREETING HEADER -->
       <header class="page-header">
         <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-          <h1>EstimatorX360</h1>
+          <h1>PriceGuideX360</h1>
           <a href="https://automatex360.com" target="_blank" rel="noopener noreferrer" class="powered-by-tag" title="Visit AutomateX360.com">
             <span>Powered By</span>
             <strong>AutomateX360</strong>
@@ -148,7 +148,7 @@
 
       <!-- MAIN INTERACTIVE APP VIEWS SECTION -->
       <div class="views-scroll-container">
-        <!-- VIEW 1: LIVE ESTIMATOR (CLIENT CALCULATOR WIZARD) -->
+        <!-- VIEW 1: LIVE PRICE GUIDE (CLIENT CALCULATOR WIZARD) -->
         <section id="view-calculator" class="view-section active">
           <div class="calculator-card">
             <!-- Floating Ticker Bar -->
