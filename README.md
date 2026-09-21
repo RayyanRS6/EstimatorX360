@@ -1,6 +1,6 @@
-# EstimatorX360 — GoHighLevel (GHL) Estimator & Calculator
+# PriceGuideX360 — GoHighLevel (GHL) Price Guide & Calculator
 
-**EstimatorX360** is an interactive, customizable calculator and form builder designed specifically for GoHighLevel (GHL) users, home renovators, contractors, and service businesses.
+**PriceGuideX360** is an interactive, customizable calculator and form builder designed specifically for GoHighLevel (GHL) users, home renovators, contractors, and service businesses.
 
 It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CAD $80,000**) for each answer option, calculate real-time running estimates step-by-step for prospective clients, and transmit lead details + complete itemized breakdown directly into **GoHighLevel** via Webhooks. All prices and estimates are Canadian dollars (CAD).
 
@@ -10,7 +10,7 @@ It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CA
 
 1. **Min/Max Lower & Upper Bound Calculation**:
    - Every question option has its own **Min Price (CAD)** and **Max Price (CAD)**.
-   - The estimator continuously sums up `Service Base Cost + Sum(Selected Options Min)` and `Service Base Cost + Sum(Selected Options Max)`.
+   - The price guide continuously sums up `Service Base Cost + Sum(Selected Options Min)` and `Service Base Cost + Sum(Selected Options Max)`.
 
 2. **5 Pre-configured Renovation Services Out-of-the-Box**:
    - **Home Extension** (Base: CAD $15,000 | 6 Questions)
@@ -21,6 +21,7 @@ It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CA
 
 3. **No-Code Form & Price Builder**:
    - Create new services or edit existing ones.
+   - Switch any individual form on or off. A disabled form disappears from every public link and the live preview, and its submissions are refused.
    - Create, rename, and remove form categories, and assign each form to any number of categories.
    - Existing forms without category data are automatically treated as Residential.
    - Prevent duplicate form names regardless of capitalization or repeated whitespace.
@@ -77,7 +78,7 @@ Saved webhook URLs are stored in a separate server-only Firestore collection. Th
 
 ### Step 3: Authorize and embed the calculator
 1. Set `FRAME_ANCESTORS` in the private `.env` file if adding custom domains (by default, `self`, `http://localhost:*`, `http://127.0.0.1:*`, `https://bridgelandbuilders.com`, and `https://*.bridgelandbuilders.com` are allowed).
-2. Open the **Embed Generator** tab in EstimatorX360.
+2. Open the **Embed Generator** tab in PriceGuideX360.
 3. Choose **All forms**, one category, or one specific form.
 4. Use **Copy Share Link** for a standalone public calculator URL, or **Copy Embed Code** for an iframe.
 5. In GHL Page Builder, drag a **Custom Code / HTML** element onto your landing page.
@@ -90,15 +91,31 @@ The root URL redirects unauthenticated visitors to `/login`. The dashboard route
 
 Public recipients use the links produced by the Embed Generator. `/embed` exposes all forms, `/embed?category=...` exposes one category, and `/embed?service=...` opens one form directly. These public routes intentionally contain no dashboard navigation or administrator controls.
 
+### Turning a single form on or off
+
+Each form has its own **Form status** switch in the Form & Price Builder, beside its title and base cost. It controls only that one form, and it is separate from the Kill Switch, which pauses every embed at once.
+
+1. Open the **Form Builder** tab and select the form.
+2. Flip **Form status** to off. The change is saved immediately, the form's tab is marked **Off**, and a banner explains what is now hidden.
+
+While a form is off:
+
+- It is removed from `/api/services` itself, so it never reaches a visitor's browser. It disappears from `/embed`, from `/embed?category=...`, and from the dashboard's own calculator and live preview.
+- Its single-form link (`/embed?service=...`) shows "This form is currently unavailable" instead of falling back to a list of the other forms. Any embed code already pasted on a customer's site keeps working and starts showing that notice, so nothing has to be replaced.
+- Estimate submissions for that form are refused with `503`, including from a page that was already open before the form was switched off.
+- The form stays fully editable in the dashboard, and its saved GHL webhook is left untouched, so switching it back on restores it exactly as it was.
+
+Forms saved before this switch existed have no stored status and stay live; only switching one off ever hides it.
+
 ### Kill Switch (pausing embeds for a customer who hasn't paid)
 
 The **Kill Switch** tab (sidebar power icon) pauses or resumes every public embed at once — since every embed link ultimately loads through `/embed`, one switch covers the main page and every category or single-form link generated from it, with no need to edit or replace any embed code already on the customer's site.
 
 1. Sign in to the dashboard with `ADMIN_PASSWORD` as usual.
 2. Open the **Kill Switch** tab. It is locked behind its own separate password (`KILL_SWITCH_PASSWORD`, set in `.env`) — the administrator login alone does not unlock it, so a shared or unattended admin session can't accidentally flip it.
-3. Enter the kill switch password once to unlock the section for up to 20 minutes, then use **Turn Estimator OFF** / **Turn Estimator ON**. An optional custom message can be set for what visitors see while paused.
+3. Enter the kill switch password once to unlock the section for up to 20 minutes, then use **Turn Price Guide OFF** / **Turn Price Guide ON**. An optional custom message can be set for what visitors see while paused.
 4. While paused, every visit to `/embed` (including category/service links, iframes, and signed-in administrators) shows the unavailable notice. Public pricing and estimate submissions are blocked for everyone. The protected dashboard remains available for editing and resuming access.
-5. The header status button shows **Estimator live** or **Estimator paused** with a **Manage** shortcut to the Kill Switch section.
+5. The header status button shows **Price Guide live** or **Price Guide paused** with a **Manage** shortcut to the Kill Switch section.
 
 Already-open embeds check availability every 15 seconds and when the page becomes visible again; they hide the calculator when paused or the status cannot be verified. Server-side submissions are blocked immediately. Existing tabs loaded before this update must be refreshed once to receive the availability check.
 

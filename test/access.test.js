@@ -54,7 +54,7 @@ test('dashboard routes require an administrator session and embeds fail closed w
   const embedResponse = await fetch(`${baseUrl}/embed?category=residential`);
   // With no database credentials the public route cannot verify whether access is paused.
   assert.equal(embedResponse.status, 503);
-  assert.match(await embedResponse.text(), /Estimator Temporarily Unavailable/);
+  assert.match(await embedResponse.text(), /Price Guide Temporarily Unavailable/);
 
   const loginResponse = await fetch(`${baseUrl}/api/admin/login`, {
     method: 'POST',

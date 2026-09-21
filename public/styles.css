@@ -1579,6 +1579,148 @@ body.dark-theme .service-tab-btn.active {
   border-color: var(--accent-coral);
 }
 
+/* --- PER-FORM ENABLE / DISABLE SWITCH --- */
+.service-tab-btn.is-disabled {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+.service-tab-btn.is-disabled.active {
+  opacity: 1;
+}
+
+.service-tab-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #B45309;
+  background: rgba(245, 158, 11, 0.16);
+}
+
+.service-tab-btn.active .service-tab-status {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.service-disabled-banner {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-dark);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.service-disabled-banner svg {
+  display: block;
+  color: #B45309;
+}
+
+.service-status-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+}
+
+.form-switch {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.form-switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.form-switch-track {
+  display: block;
+  width: 48px;
+  height: 27px;
+  padding: 3px;
+  border-radius: 999px;
+  background: #D1D5DB;
+  transition: background 0.22s ease;
+}
+
+body.dark-theme .form-switch-track {
+  background: #3A3D45;
+}
+
+.form-switch-thumb {
+  display: block;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s ease;
+}
+
+.form-switch input:checked + .form-switch-track {
+  background: #16A34A;
+}
+
+.form-switch input:checked + .form-switch-track .form-switch-thumb {
+  transform: translateX(21px);
+}
+
+.form-switch input:focus-visible + .form-switch-track {
+  outline: 2px solid var(--accent-coral);
+  outline-offset: 2px;
+}
+
+.service-status-label {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.service-status-label.is-live {
+  color: #16A34A;
+}
+
+.service-status-label.is-off {
+  color: #B45309;
+}
+
+.embed-scope-warning {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #B45309;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.webhook-status + .webhook-status {
+  margin-left: 8px;
+}
+
+body.dark-theme .service-tab-status,
+body.dark-theme .service-disabled-banner svg,
+body.dark-theme .service-status-label.is-off,
+body.dark-theme .embed-scope-warning {
+  color: #FBBF24;
+}
+
 .service-edit-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);

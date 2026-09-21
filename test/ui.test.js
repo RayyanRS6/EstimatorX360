@@ -29,7 +29,7 @@ test('option price inputs coordinate valid ranges and catalog saves are serializ
   assert.match(app, /catalogSaveQueue\.then\(performSave, performSave\)/);
 });
 
-test('estimator status replaces the global banner with a header management button', () => {
+test('Price Guide status replaces the global banner with a header management button', () => {
   const dashboard = fs.readFileSync(path.join(root, 'dashboard.html'), 'utf8');
   assert.doesNotMatch(dashboard, /global-kill-switch-banner|Protected area/);
   assert.match(dashboard, /<button[^>]*id="estimator-status-button"[^>]*onclick="switchView\('kill-switch'\)"/);

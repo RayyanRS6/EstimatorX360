@@ -106,13 +106,13 @@ test('unlock, pause, reload, and resume render the server state without another 
   await context.unlockKillSwitch({ preventDefault() {} });
   await context.pushKillSwitchUpdate(false, paused.message, 'Paused');
   assert.equal(context.state.killSwitch.active, false);
-  assert.match(container.innerHTML, /Estimator is paused/);
+  assert.match(container.innerHTML, /Price Guide is paused/);
   await context.renderKillSwitchSettings();
-  assert.match(container.innerHTML, /Estimator is paused/);
+  assert.match(container.innerHTML, /Price Guide is paused/);
   await context.pushKillSwitchUpdate(true, paused.message, 'Resumed');
   assert.equal(context.state.killSwitch.active, true);
   assert.equal(context.state.adminAuthenticated, true);
   assert.equal(context.state.killSwitch.unlocked, true);
-  assert.match(container.innerHTML, /Estimator is live/);
+  assert.match(container.innerHTML, /Price Guide is live/);
   assert.equal(calls.some(call => call.url === '/api/admin/login'), false);
 });

@@ -23,7 +23,7 @@ const KILL_SWITCH_PASSWORD = process.env.KILL_SWITCH_PASSWORD || '';
 const KILL_SWITCH_COOKIE_NAME = IS_PRODUCTION ? '__Host-priceguide_killswitch' : 'priceguide_killswitch';
 const KILL_SWITCH_TTL_SECONDS = 20 * 60;
 const KILL_SWITCH_DOC_ID = 'status';
-const DEFAULT_KILL_SWITCH_MESSAGE = 'This estimator is temporarily unavailable. Please check back soon or contact us directly.';
+const DEFAULT_KILL_SWITCH_MESSAGE = 'This price guide is temporarily unavailable. Please check back soon or contact us directly.';
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || '';
 const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || '(default)';
 const FIRESTORE_SERVICES_COLLECTION = process.env.FIRESTORE_SERVICES_COLLECTION || 'services';
@@ -395,6 +395,10 @@ function validateServices(input, categories = [DEFAULT_CATEGORY]) {
     const baseCost = cleanMoney(service?.baseCost);
     const rawCategoryIds = service?.categoryIds === undefined ? [DEFAULT_CATEGORY.id] : service.categoryIds;
     const normalizedTitle = normalizeName(title);
+    // Forms stored before the per-form switch existed carry no `enabled` field. They stay
+    // published, so only an explicit `false` ever hides a form from the public catalogue.
+    if (service?.enabled !== undefined && typeof service.enabled !== 'boolean') return null;
+    const enabled = service?.enabled !== false;
     if (!id || !/^[a-z0-9][a-z0-9-]*$/i.test(id) || serviceIds.has(id) || !title || serviceTitles.has(normalizedTitle) || !icon || baseCost === null) return null;
     if (!Array.isArray(rawCategoryIds) || rawCategoryIds.length > 30) return null;
     const cleanCategoryIds = [...new Set(rawCategoryIds.map(categoryId => cleanString(categoryId, 80, true)))];
@@ -434,9 +438,16 @@ function validateServices(input, categories = [DEFAULT_CATEGORY]) {
       }
       questions.push({ id: qid, title: qtitle, type: question.type, options });
     }
-    result.push({ id, title, icon, baseCost, categoryIds: cleanCategoryIds, questions });
+    result.push({ id, title, icon, baseCost, enabled, categoryIds: cleanCategoryIds, questions });
   }
   return result;
+}
+
+// A disabled form is withheld from every public surface: the embed catalogue, every
+// category or single-form embed link, and estimate submissions. Only the authenticated
+// dashboard continues to see it so it can be edited and switched back on.
+function isServiceEnabled(service) {
+  return service?.enabled !== false;
 }
 
 async function readCategories() {
@@ -498,7 +509,7 @@ function validateKillSwitchMessage(value) {
 }
 
 // A missing status document defaults to active. A failed read must never reopen a
-// paused estimator; public callers stay unavailable until the status can be verified.
+// paused price guide; public callers stay unavailable until the status can be verified.
 async function readKillSwitchStatus() {
   if (!killSwitchCollection) throw new Error('Firestore server credentials are not configured.');
   const document = await killSwitchCollection.doc(KILL_SWITCH_DOC_ID).get();
@@ -534,7 +545,7 @@ function escapeHtmlServer(value) {
 }
 
 // Rendered directly by the /embed route (without loading dashboard.html/app.js at all)
-// whenever the estimator is switched off for a public, unauthenticated visitor. It ships
+// whenever the price guide is switched off for a public, unauthenticated visitor. It ships
 // the same resize postMessage contract as the real embed so an iframe already pasted on
 // the customer's site resizes cleanly to this notice instead of showing empty space.
 function renderKillSwitchPage(message) {
@@ -544,7 +555,7 @@ function renderKillSwitchPage(message) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Estimator Unavailable</title>
+<title>Price Guide Unavailable</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -609,7 +620,7 @@ function renderKillSwitchPage(message) {
     <div class="notice-icon">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     </div>
-    <h1>Estimator Temporarily Unavailable</h1>
+    <h1>Price Guide Temporarily Unavailable</h1>
     <p>${safeMessage}</p>
     <a class="notice-link" href="https://automatex360.com" target="_top" rel="noreferrer">Visit AutomateX360 →</a>
   </div>
@@ -643,6 +654,11 @@ async function buildEstimate(input) {
   const serviceId = cleanString(selection?.service_id, 80, true);
   const services = await readServices();
   const service = services.find(item => item.id === serviceId);
+  // A form switched off mid-session must stop accepting submissions, even from a page
+  // that was already open or from a request crafted outside the calculator.
+  if (service && !isServiceEnabled(service)) {
+    throw Object.assign(new Error('This form is currently unavailable.'), { code: 'FORM_DISABLED' });
+  }
   if (!service || !selection.selections || typeof selection.selections !== 'object' || Array.isArray(selection.selections)) return null;
 
   let minTotal = service.baseCost;
@@ -770,18 +786,23 @@ async function requireActiveEstimator(_req, res, next) {
   next();
 }
 
-async function sendCatalog(_req, res) {
-  try {
-    const catalog = await readCatalog();
-    res.set('Cache-Control', 'no-store').json({ currency: CURRENCY_CODE, ...catalog });
-  } catch (error) {
-    console.error('Service read failed:', error.message);
-    sendError(res, 503, 'Unable to load services.');
-  }
+function sendCatalog({ publicOnly }) {
+  return async (_req, res) => {
+    try {
+      const catalog = await readCatalog();
+      const services = publicOnly ? catalog.services.filter(isServiceEnabled) : catalog.services;
+      res.set('Cache-Control', 'no-store').json({ currency: CURRENCY_CODE, categories: catalog.categories, services });
+    } catch (error) {
+      console.error('Service read failed:', error.message);
+      sendError(res, 503, 'Unable to load services.');
+    }
+  };
 }
-app.get('/api/services', requireActiveEstimator, sendCatalog);
+// Disabled forms never reach a public visitor: they are removed from the response itself,
+// not merely hidden by the browser.
+app.get('/api/services', requireActiveEstimator, sendCatalog({ publicOnly: true }));
 // Editing forms remains available through a separate authenticated dashboard route.
-app.get('/api/admin/services', requireAdmin, sendCatalog);
+app.get('/api/admin/services', requireAdmin, sendCatalog({ publicOnly: false }));
 
 app.get('/api/embed/config', async (_req, res) => {
   const killSwitch = await readKillSwitchStatusSafe('embed-config');
@@ -856,6 +877,7 @@ app.post('/api/estimate', requireSameOrigin, estimateLimiter, requireActiveEstim
   try {
     payload = await buildEstimate(req.body);
   } catch (error) {
+    if (error?.code === 'FORM_DISABLED') return sendError(res, 503, 'This form is currently unavailable.');
     console.error('Estimate calculation failed:', error.message);
     return sendError(res, 500, 'Unable to calculate estimate.');
   }
@@ -1113,6 +1135,7 @@ module.exports.getAnswerFieldKey = getAnswerFieldKey;
 module.exports.normalizeName = normalizeName;
 module.exports.validateCategories = validateCategories;
 module.exports.validateServices = validateServices;
+module.exports.isServiceEnabled = isServiceEnabled;
 module.exports.parseFrameAncestors = parseFrameAncestors;
 module.exports.readCategories = readCategories;
 module.exports.readCatalog = readCatalog;
