@@ -8,6 +8,10 @@ html {
   background-color: var(--bg-dashboard);
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+  /* Stops iOS Safari inflating text when a phone is turned landscape, which
+     otherwise renders the embed at a different scale than it was designed. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body.dark-theme {
@@ -2587,4 +2591,216 @@ body.dark-theme .breakdown-item {
 
 .option-card:hover .option-card-media img {
   transform: scale(1.05);
+}
+
+/* -------------------------------------------------------------
+   PHONE BREAKPOINTS
+   Everything above is the existing desktop/tablet design and is
+   left untouched. These rules only rescale it for phone widths.
+   The embed is the surface that matters most here: it is iframed
+   into bridgelandbuilders.com at roughly 300-340px wide, so it has
+   to hold up well below the width of the phone itself.
+   ------------------------------------------------------------- */
+@media (max-width: 640px) {
+  /* ---- Form fields ----
+     Any field under 16px makes iOS Safari zoom the whole page in when the
+     visitor taps it, which then leaves the embed scrolled sideways inside its
+     iframe. 16px is the threshold, so these stay at 16px on phones. */
+  .form-input,
+  .form-select,
+  .form-textarea {
+    font-size: 16px;
+    padding: 12px 14px;
+    min-height: 46px;
+  }
+
+  .form-select {
+    padding-right: 38px;
+  }
+
+  .form-textarea {
+    min-height: 88px;
+  }
+
+  .form-label {
+    font-size: 13px;
+  }
+
+  .lead-form-grid {
+    gap: 14px;
+    margin-top: 14px;
+  }
+
+  /* ---- Wizard / calculator ----
+     The embed variant is listed too: the existing 768px block styles
+     `.embed-mode .calculator-body`, which would otherwise outrank this. */
+  .calculator-body,
+  .embed-mode .calculator-body {
+    padding: 22px 16px;
+  }
+
+  .calculator-card {
+    border-radius: 18px;
+  }
+
+  .section-title {
+    font-size: 22px;
+    letter-spacing: -0.5px;
+    overflow-wrap: break-word;
+  }
+
+  .section-desc {
+    font-size: 14px;
+  }
+
+  .sticky-ticker-bar {
+    padding: 12px 16px;
+  }
+
+  .option-card {
+    padding: 16px;
+    border-radius: 16px;
+    gap: 12px;
+  }
+
+  /* "Back to Questions" and "Submit & Send Estimate" were squeezed side by
+     side into a 300px row, wrapping both labels onto three lines. */
+  .wizard-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 24px;
+  }
+
+  .wizard-footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 13px 20px;
+    min-height: 46px;
+  }
+
+  /* ---- Dashboard shell ----
+     The admin UI is built around a fixed navbar row and a 270px minimum card
+     column, both of which overflowed a phone screen. */
+  body {
+    padding: 14px;
+    padding-left: max(14px, env(safe-area-inset-left));
+    padding-right: max(14px, env(safe-area-inset-right));
+  }
+
+  body.embed-mode {
+    padding: 0;
+  }
+
+  .dashboard-app {
+    gap: 10px;
+  }
+
+  .navbar {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .user-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .profile-pill {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .profile-info {
+    min-width: 0;
+  }
+
+  .page-header h1 {
+    font-size: 24px;
+    letter-spacing: -0.6px;
+    overflow-wrap: break-word;
+  }
+
+  .page-header p {
+    font-size: 14px;
+  }
+
+  .services-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .service-card {
+    padding: 20px;
+    border-radius: 18px;
+  }
+
+  /* ---- Login ---- */
+  .lock-card {
+    padding: 28px 20px;
+  }
+}
+
+@media (max-width: 400px) {
+
+  .calculator-body,
+  .embed-mode .calculator-body {
+    padding: 18px 12px;
+  }
+
+  .section-title {
+    font-size: 20px;
+  }
+
+  .option-card {
+    padding: 14px 12px;
+  }
+
+  .sticky-ticker-bar {
+    padding: 10px 12px;
+  }
+
+  .estimate-value {
+    font-size: 20px;
+  }
+
+  body {
+    padding: 10px;
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+  }
+
+  body.embed-mode {
+    padding: 0;
+  }
+}
+
+/* Hover-driven affordances do nothing on a touch screen, and the lift
+   transforms just cause repaint jitter while scrolling. */
+@media (hover: none) {
+  .service-card:hover,
+  .btn-primary:hover,
+  .option-card:hover .option-card-media img,
+  .powered-by-footer-link:hover {
+    transform: none;
+  }
+
+  .btn:active {
+    transform: scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
