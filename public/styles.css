@@ -2582,6 +2582,15 @@ body.dark-theme .breakdown-item {
   position: relative;
 }
 
+/* Previously an inline style on the element; moved here so the phone
+   breakpoints can reflow it. Values are unchanged. */
+.option-card-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+}
+
 .option-card-media img {
   width: 100%;
   height: 100%;
@@ -2661,6 +2670,70 @@ body.dark-theme .breakdown-item {
     padding: 16px;
     border-radius: 16px;
     gap: 12px;
+  }
+
+  /* ---- Picture options, two to a row ----
+     A single column of 140px-tall photos made a six-question form a very long
+     scroll on a phone. Only grids that actually contain photo options reflow;
+     text-only questions stay full width, where a long label reads better.
+     Browsers without :has() simply keep the single column. */
+  .options-grid:has(.option-card.has-image) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .option-card.has-image {
+    padding: 8px;
+    border-radius: 14px;
+  }
+
+  .option-card.has-image .option-card-media {
+    height: 88px;
+    margin-bottom: 8px;
+    border-radius: 9px;
+  }
+
+  .option-card.has-image .option-card-row {
+    gap: 7px;
+  }
+
+  .option-card.has-image .checkbox-circle {
+    width: 17px;
+    height: 17px;
+    margin-top: 1px;
+    border-width: 1.5px;
+  }
+
+  .option-card.has-image .checkbox-circle svg {
+    width: 10px;
+    height: 10px;
+  }
+
+  .option-card.has-image .option-label {
+    font-size: 12.5px;
+    line-height: 1.3;
+    margin-bottom: 2px;
+    overflow-wrap: break-word;
+    hyphens: auto;
+  }
+
+  .option-card.has-image .option-price-range,
+  .option-card.has-image .option-price-zero {
+    font-size: 11px;
+  }
+
+  /* The selected ring is drawn outside the border, so at a 10px gutter the
+     two columns would otherwise touch. */
+  .option-card.has-image.selected {
+    box-shadow: 0 0 0 1.5px var(--accent-coral);
+  }
+
+  /* A plain option ("None needed") sitting beside photo tiles is stretched to
+     their height by the grid; centring stops its text floating at the top. */
+  .options-grid:has(.option-card.has-image) .option-card:not(.has-image) {
+    align-items: center;
+    padding: 12px;
   }
 
   /* "Back to Questions" and "Submit & Send Estimate" were squeezed side by

@@ -634,7 +634,7 @@ function renderCalculator() {
               <img src="${escapeHtml(getOptimizedImageUrl(opt.imageUrl, 600, 300))}" alt="${escapeHtml(opt.label)}" loading="lazy" />
             </div>
           ` : ''}
-          <div style="display: flex; align-items: flex-start; gap: 12px; width: 100%;">
+          <div class="option-card-row">
             <div class="checkbox-circle">${isSelected ? getIconSvg('check') : ''}</div>
             <div class="option-content">
               <div class="option-label">${escapeHtml(opt.label)}</div>
