@@ -2877,3 +2877,262 @@ body.dark-theme .breakdown-item {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* -------------------------------------------------------------
+   SITE-MATCHED EMBED THEME: BRIDGELAND BUILDERS
+   Only active on the public /embed page loaded with ?theme=bridgeland
+   (app.js sets html[data-embed-theme="bridgeland"]). Every rule is
+   scoped to that attribute, so the dashboard, share links and any
+   embed without the parameter keep the original design above.
+   Colours, radii and shadows mirror bridgelandbuilders.com
+   (src/index.css :root). Sizes are deliberately not overridden, so
+   the phone breakpoints above still apply unchanged.
+   ------------------------------------------------------------- */
+html[data-embed-theme="bridgeland"],
+html[data-embed-theme="bridgeland"] body {
+  --bb-red: #C20917;
+  --bb-red-hover: #A10712;
+  --bb-red-shadow: rgba(194, 9, 23, 0.28);
+  --bb-seagreen: #217A8A;
+  --bb-seagreen-hover: #195F6C;
+  --bb-seagreen-light: rgba(33, 122, 138, 0.12);
+  --bb-seagreen-tint: rgba(33, 122, 138, 0.06);
+  --bb-seagreen-border: rgba(33, 122, 138, 0.4);
+  --bb-bg-warm: #F7F5F0;
+  --bb-bg-cream: #EEE9E0;
+  --bb-text: #1F1B18;
+  --bb-muted: #5E5750;
+  --bb-border: rgba(31, 27, 24, 0.1);
+  --bb-shadow-soft: 0 12px 32px -8px rgba(31, 27, 24, 0.08);
+  --bb-shadow-lift: 0 20px 40px -10px rgba(31, 27, 24, 0.14);
+  --bb-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Re-point the shared tokens, so anything not restyled below
+     (toasts, notices, links) still picks up the site's palette. */
+  --font-heading: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --bg-dashboard: var(--bb-bg-warm);
+  --bg-card: #FFFFFF;
+  --accent-coral: var(--bb-red);
+  --accent-coral-hover: var(--bb-red-hover);
+  --accent-coral-light: rgba(194, 9, 23, 0.08);
+  --accent-coral-glow: rgba(194, 9, 23, 0.25);
+  --text-dark: var(--bb-text);
+  --text-muted: var(--bb-muted);
+  --text-light: #ABA298;
+  --border-color: var(--bb-border);
+  --card-radius: 24px;
+  --shadow-subtle: var(--bb-shadow-soft);
+}
+
+html[data-embed-theme="bridgeland"] body.embed-mode {
+  color: var(--bb-text);
+  background: #FFFFFF;
+}
+
+/* Headings and intro copy: the site's .section-title / .section-desc */
+html[data-embed-theme="bridgeland"] .section-title {
+  color: var(--bb-text);
+  letter-spacing: -0.5px;
+}
+
+html[data-embed-theme="bridgeland"] .section-desc {
+  color: var(--bb-muted);
+  font-weight: 400;
+}
+
+/* Running estimate bar */
+html[data-embed-theme="bridgeland"] .step-badge {
+  background: var(--bb-seagreen-light);
+  border-color: transparent;
+  color: var(--bb-seagreen);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+html[data-embed-theme="bridgeland"] .live-estimate-badge {
+  background: var(--bb-seagreen-tint);
+  border-color: rgba(33, 122, 138, 0.22);
+}
+
+html[data-embed-theme="bridgeland"] .estimate-label,
+html[data-embed-theme="bridgeland"] .estimate-value {
+  color: var(--bb-seagreen);
+}
+
+html[data-embed-theme="bridgeland"] .progress-bar-container {
+  background: var(--bb-bg-cream);
+}
+
+html[data-embed-theme="bridgeland"] .progress-bar-fill {
+  background: var(--bb-seagreen);
+}
+
+/* Category filter: the site's filter pills */
+html[data-embed-theme="bridgeland"] .category-filter-btn {
+  border-color: var(--bb-border);
+  background: var(--bb-bg-warm);
+  color: var(--bb-muted);
+  font-weight: 600;
+}
+
+html[data-embed-theme="bridgeland"] .category-filter-btn:hover {
+  border-color: var(--bb-seagreen-border);
+  background: var(--bb-bg-warm);
+  color: var(--bb-text);
+}
+
+html[data-embed-theme="bridgeland"] .category-filter-btn.active {
+  border-color: var(--bb-seagreen);
+  background: var(--bb-seagreen);
+  color: var(--bb-bg-warm);
+}
+
+/* Service cards: the site's service cards and floating category tag */
+html[data-embed-theme="bridgeland"] .service-card {
+  border-color: var(--bb-border);
+  box-shadow: var(--bb-shadow-soft);
+  transition: transform 0.35s var(--bb-ease), box-shadow 0.35s var(--bb-ease), border-color 0.35s var(--bb-ease);
+}
+
+html[data-embed-theme="bridgeland"] .service-card:hover {
+  transform: translateY(-6px);
+  border-color: var(--bb-seagreen-border);
+  box-shadow: var(--bb-shadow-lift);
+}
+
+html[data-embed-theme="bridgeland"] .service-card-icon {
+  background: var(--bb-seagreen-light);
+  color: var(--bb-seagreen);
+}
+
+html[data-embed-theme="bridgeland"] .service-card-title {
+  color: var(--bb-text);
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+html[data-embed-theme="bridgeland"] .service-card-categories span {
+  padding: 4px 10px;
+  border-left: 3px solid var(--bb-seagreen);
+  background: var(--bb-seagreen-tint);
+  color: var(--bb-seagreen);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+html[data-embed-theme="bridgeland"] .service-card-base {
+  color: var(--bb-seagreen);
+}
+
+/* Question options */
+html[data-embed-theme="bridgeland"] .option-card {
+  border-color: var(--bb-border);
+}
+
+html[data-embed-theme="bridgeland"] .option-card:hover {
+  border-color: var(--bb-seagreen-border);
+}
+
+html[data-embed-theme="bridgeland"] .option-card.selected {
+  border-color: var(--bb-seagreen);
+  background: var(--bb-seagreen-tint);
+  box-shadow: 0 0 0 1.5px var(--bb-seagreen);
+}
+
+html[data-embed-theme="bridgeland"] .option-card.selected .checkbox-circle {
+  border-color: var(--bb-seagreen);
+  background: var(--bb-seagreen);
+}
+
+html[data-embed-theme="bridgeland"] .option-label {
+  color: var(--bb-text);
+}
+
+html[data-embed-theme="bridgeland"] .option-price-range {
+  color: var(--bb-seagreen);
+}
+
+/* Buttons: the site's red pill CTA and ghost pill */
+html[data-embed-theme="bridgeland"] .btn {
+  border-radius: 9999px;
+  transition: background-color 0.35s var(--bb-ease), border-color 0.35s var(--bb-ease), color 0.35s var(--bb-ease), box-shadow 0.35s var(--bb-ease), transform 0.35s var(--bb-ease);
+}
+
+html[data-embed-theme="bridgeland"] .btn-primary,
+html[data-embed-theme="bridgeland"] .btn-success {
+  background: var(--bb-red);
+  color: #FFFFFF;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  box-shadow: 0 4px 14px var(--bb-red-shadow);
+}
+
+html[data-embed-theme="bridgeland"] .btn-primary:hover,
+html[data-embed-theme="bridgeland"] .btn-success:hover {
+  background: var(--bb-red-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(194, 9, 23, 0.38);
+}
+
+html[data-embed-theme="bridgeland"] .btn-secondary {
+  border: 1.5px solid var(--bb-border);
+  background: transparent;
+  color: var(--bb-text);
+  font-weight: 600;
+}
+
+html[data-embed-theme="bridgeland"] .btn-secondary:hover {
+  border-color: var(--bb-seagreen);
+  background: #FFFFFF;
+  color: var(--bb-seagreen);
+  transform: translateY(-2px);
+}
+
+/* Contact form: the site's quote form fields */
+html[data-embed-theme="bridgeland"] .form-label {
+  color: var(--bb-text);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+html[data-embed-theme="bridgeland"] .form-input,
+html[data-embed-theme="bridgeland"] .form-textarea {
+  border: 1px solid var(--bb-border);
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: var(--bb-text);
+}
+
+html[data-embed-theme="bridgeland"] .form-input:focus,
+html[data-embed-theme="bridgeland"] .form-textarea:focus {
+  border-color: var(--bb-seagreen);
+  box-shadow: 0 0 0 3px var(--bb-seagreen-light);
+  background: #FFFFFF;
+}
+
+/* Estimate breakdown pop-up */
+html[data-embed-theme="bridgeland"] .breakdown-item {
+  border-radius: 8px;
+  background: var(--bb-bg-warm);
+}
+
+html[data-embed-theme="bridgeland"] .breakdown-item.total {
+  border-color: rgba(33, 122, 138, 0.3);
+  background: var(--bb-seagreen-tint);
+  color: var(--bb-seagreen);
+}
+
+html[data-embed-theme="bridgeland"] .toast {
+  background: #191715;
+}
+
+/* Touch screens: same no-lift rule as the original design. */
+@media (hover: none) {
+  html[data-embed-theme="bridgeland"] .service-card:hover,
+  html[data-embed-theme="bridgeland"] .btn-primary:hover,
+  html[data-embed-theme="bridgeland"] .btn-success:hover,
+  html[data-embed-theme="bridgeland"] .btn-secondary:hover {
+    transform: none;
+  }
+}

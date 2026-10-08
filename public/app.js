@@ -48,6 +48,20 @@ const pageUrl = new URL(window.location.href);
 const isEmbedMode = pageUrl.pathname.replace(/\/$/, '').endsWith('/embed') || pageUrl.searchParams.get('embed') === '1';
 const requestedEmbedServiceId = isEmbedMode ? (pageUrl.searchParams.get('service') || '') : '';
 const requestedEmbedCategoryId = isEmbedMode && !requestedEmbedServiceId ? (pageUrl.searchParams.get('category') || '') : '';
+// Optional site-matched look for the public embed. `/embed?theme=bridgeland` restyles
+// the calculator to match bridgelandbuilders.com (see the theme block at the end of
+// styles.css). Without the parameter — share links, GHL pages, the dashboard preview —
+// the original design is used. Only names on this list are honoured, and never on the
+// private dashboard.
+const EMBED_THEMES = ["bridgeland"];
+const EMBED_THEME_FONTS = {
+  // The exact Google Fonts request bridgelandbuilders.com makes: DM Sans with its
+  // optical-size axis, so headings render with the same letterforms as the site.
+  bridgeland: "https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400;1,9..40,600&display=swap"
+};
+const requestedEmbedTheme = isEmbedMode ? String(pageUrl.searchParams.get('theme') || '').trim().toLowerCase() : '';
+const embedTheme = EMBED_THEMES.includes(requestedEmbedTheme) ? requestedEmbedTheme : '';
+if (embedTheme) applyEmbedTheme(embedTheme);
 let embedResizeFrame = null;
 let lastEmbeddedHeight = 0;
 let catalogSaveQueue = Promise.resolve();
@@ -372,7 +386,18 @@ function setupNavigation() {
   });
 }
 
+// Runs before the first render so the calculator never flashes in the default colours.
+function applyEmbedTheme(theme) {
+  document.documentElement.dataset.embedTheme = theme;
+  const fontHref = EMBED_THEME_FONTS[theme];
+  const fontLink = document.querySelector('link[rel="stylesheet"][href^="https://fonts.googleapis.com/css2?family=DM+Sans"]');
+  if (fontHref && fontLink && fontLink.href !== fontHref) fontLink.href = fontHref;
+}
+
 function setupThemeToggle() {
+  // A site-matched embed always follows its host site's light design, even in a
+  // browser where an administrator once switched the dashboard to dark mode.
+  if (embedTheme) return;
   const lightBtn = document.getElementById("theme-light-btn");
   const darkBtn = document.getElementById("theme-dark-btn");
 
@@ -517,7 +542,7 @@ function getBrandFooterHtml() {
   return `
     <div class="calculator-brand-footer">
       <a href="https://automatex360.com" target="_blank" rel="noopener noreferrer" class="powered-by-footer-link" title="Visit AutomateX360.com">
-        <span>PriceGuideX360</span>
+        <span>Price Calculator</span>
         <span class="footer-divider">•</span>
         <span>Powered By <strong>AutomateX360</strong></span>
       </a>
@@ -897,7 +922,7 @@ function renderBuilder() {
   let html = `
     <div class="builder-header">
       <div>
-        <h2 class="section-title">PriceGuideX360 Form Builder</h2>
+        <h2 class="section-title">Price Calculator Form Builder</h2>
         <p class="section-desc">Organize forms into categories, configure starting costs, edit questions, and set Min/Max price ranges.</p>
       </div>
       <div style="display: flex; gap: 10px;">
@@ -1819,7 +1844,7 @@ function buildEmbedCode(scope = "all") {
   width="100%"
   height="760"
   style="display:block;width:100%;min-height:500px;border:0;outline:0;border-radius:20px;overflow:hidden;box-shadow:0 16px 42px rgba(18,19,22,0.14);"
-  title="PriceGuideX360 renovation price guide"
+  title="Renovation Price Calculator"
   loading="lazy"
   referrerpolicy="no-referrer"
   sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation-by-user-activation"
@@ -2088,7 +2113,7 @@ function renderKillSwitchPanel(container = document.getElementById("kill-switch-
       <div class="builder-header kill-switch-header">
         <div class="kill-switch-header-text">
           <h2 class="section-title">Kill Switch — Billing Control</h2>
-          <p class="section-desc">Pause every PriceGuideX360 embed at once — the main <code>/embed</code> page and every category or single-form link built from it — then resume them the moment an account is settled.</p>
+          <p class="section-desc">Pause every Price Calculator embed at once — the main <code>/embed</code> page and every category or single-form link built from it — then resume them the moment an account is settled.</p>
         </div>
         <button class="btn btn-secondary" type="button" onclick="lockKillSwitchSection()">${getIconSvg('lock')} Lock Section</button>
       </div>

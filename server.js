@@ -544,12 +544,40 @@ function escapeHtmlServer(value) {
   }[char]));
 }
 
+// Public embeds can ask for a site-matched look with `/embed?theme=<name>` (app.js and the
+// theme block at the end of styles.css). Only names listed here are honoured; anything
+// else falls back to the original design.
+const EMBED_THEMES = new Set(['bridgeland']);
+
+function readEmbedTheme(req) {
+  const value = typeof req.query?.theme === 'string' ? req.query.theme.trim().toLowerCase() : '';
+  return EMBED_THEMES.has(value) ? value : '';
+}
+
+// Colours for the paused-embed notice below, per theme.
+const KILL_SWITCH_PAGE_PALETTES = {
+  default: {
+    fontQuery: 'family=DM+Sans:wght@400;500;600;700;800',
+    page: '#F4F5F8', text: '#121316', card: '#FFFFFF', border: '#EEF0F4', radius: '22px',
+    shadow: '0 8px 24px rgba(0, 0, 0, 0.05)', iconBackground: 'rgba(250, 88, 56, 0.1)',
+    icon: '#FA5838', muted: '#6B7280', link: '#C43B20'
+  },
+  // Mirrors bridgelandbuilders.com so a paused embed still looks at home on that site.
+  bridgeland: {
+    fontQuery: 'family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800',
+    page: '#FFFFFF', text: '#1F1B18', card: '#F7F5F0', border: 'rgba(31, 27, 24, 0.1)', radius: '24px',
+    shadow: 'none', iconBackground: 'rgba(194, 9, 23, 0.08)',
+    icon: '#C20917', muted: '#5E5750', link: '#217A8A'
+  }
+};
+
 // Rendered directly by the /embed route (without loading dashboard.html/app.js at all)
 // whenever the price guide is switched off for a public, unauthenticated visitor. It ships
 // the same resize postMessage contract as the real embed so an iframe already pasted on
 // the customer's site resizes cleanly to this notice instead of showing empty space.
-function renderKillSwitchPage(message) {
+function renderKillSwitchPage(message, theme = '') {
   const safeMessage = escapeHtmlServer(message || DEFAULT_KILL_SWITCH_MESSAGE);
+  const palette = KILL_SWITCH_PAGE_PALETTES[theme] || KILL_SWITCH_PAGE_PALETTES.default;
   return `<!DOCTYPE html>
 <html lang="en-CA">
 <head>
@@ -558,14 +586,14 @@ function renderKillSwitchPage(message) {
 <title>Price Guide Unavailable</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?${palette.fontQuery}&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #F4F5F8;
-    color: #121316;
+    background: ${palette.page};
+    color: ${palette.text};
     display: flex;
     align-items: center;
     justify-content: center;
@@ -575,10 +603,10 @@ function renderKillSwitchPage(message) {
   .notice {
     max-width: 560px;
     width: 100%;
-    background: #FFFFFF;
-    border: 1px solid #EEF0F4;
-    border-radius: 22px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+    background: ${palette.card};
+    border: 1px solid ${palette.border};
+    border-radius: ${palette.radius};
+    box-shadow: ${palette.shadow};
     padding: 32px;
     text-align: center;
   }
@@ -587,8 +615,8 @@ function renderKillSwitchPage(message) {
     height: 48px;
     margin: 0 auto 16px;
     border-radius: 14px;
-    background: rgba(250, 88, 56, 0.1);
-    color: #FA5838;
+    background: ${palette.iconBackground};
+    color: ${palette.icon};
     display: flex;
     align-items: center;
     justify-content: center;
@@ -601,14 +629,14 @@ function renderKillSwitchPage(message) {
   .notice p {
     font-size: 14px;
     line-height: 1.6;
-    color: #6B7280;
+    color: ${palette.muted};
     margin: 0;
     white-space: pre-wrap;
   }
   .notice-link {
     display: inline-block;
     margin-top: 20px;
-    color: #C43B20;
+    color: ${palette.link};
     font-size: 14px;
     font-weight: 700;
     text-underline-offset: 4px;
@@ -1105,7 +1133,7 @@ app.get('/embed', async (req, res, next) => {
   if (killSwitch.active) return sendFrontendFile('dashboard.html', 'no-store', true)(req, res, next);
   res.set('Cache-Control', 'no-store');
   res.set('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.status(503).type('html').send(renderKillSwitchPage(killSwitch.message));
+  res.status(503).type('html').send(renderKillSwitchPage(killSwitch.message, readEmbedTheme(req)));
 });
 app.get('/app.js', sendFrontendFile('app.js', 'no-store', true));
 app.get('/styles.css', sendFrontendFile('styles.css', IS_PRODUCTION ? 'public, max-age=3600' : 'no-store', true));

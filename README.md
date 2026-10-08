@@ -1,6 +1,6 @@
-# PriceGuideX360 — GoHighLevel (GHL) Price Guide & Calculator
+# Price Calculator by AutomateX360 — GoHighLevel (GHL) Price Guide
 
-**PriceGuideX360** is an interactive, customizable calculator and form builder designed specifically for GoHighLevel (GHL) users, home renovators, contractors, and service businesses.
+**Price Calculator** (Powered By AutomateX360) is an interactive, customizable calculator and form builder designed specifically for GoHighLevel (GHL) users, home renovators, contractors, and service businesses.
 
 It allows you to set lower and upper estimated bounds (e.g. **CAD $75,000 – CAD $80,000**) for each answer option, calculate real-time running estimates step-by-step for prospective clients, and transmit lead details + complete itemized breakdown directly into **GoHighLevel** via Webhooks. All prices and estimates are Canadian dollars (CAD).
 
@@ -78,13 +78,22 @@ Saved webhook URLs are stored in a separate server-only Firestore collection. Th
 
 ### Step 3: Authorize and embed the calculator
 1. Set `FRAME_ANCESTORS` in the private `.env` file if adding custom domains (by default, `self`, `http://localhost:*`, `http://127.0.0.1:*`, `https://bridgelandbuilders.com`, and `https://*.bridgelandbuilders.com` are allowed).
-2. Open the **Embed Generator** tab in PriceGuideX360.
+2. Open the **Embed Generator** tab of the Price Calculator dashboard.
 3. Choose **All forms**, one category, or one specific form.
 4. Use **Copy Share Link** for a standalone public calculator URL, or **Copy Embed Code** for an iframe.
 5. In GHL Page Builder, drag a **Custom Code / HTML** element onto your landing page.
 6. Paste the code into the Custom HTML editor, save, and publish.
 
 The generated `/embed` page contains only the public calculator. It excludes the navigation, form builder, webhook settings, and administrator session lookup. Its resize message contains only a numeric height, and the generated parent script verifies both the iframe window and its origin before resizing. The main dashboard cannot be framed by external sites.
+
+### Matching the host website's look (embed themes)
+
+Any embed link can ask for a site-matched style by adding `theme=<name>`, for example `https://estimator.bridgelandbuilders.com/embed?category=residential&theme=bridgeland`. The Bridgeland theme swaps the calculator's colours, buttons, cards and form fields for the ones used on bridgelandbuilders.com, and the paused-embed notice follows it too.
+
+- Without `theme`, every link — share links, GHL Custom Code embeds and the dashboard preview — keeps the original Price Calculator design. The private dashboard never changes.
+- Only themes listed in `EMBED_THEMES` (in both `app.js` and `server.js`) are honoured; anything else is ignored.
+- The theme lives in one block at the end of `styles.css`, scoped to `html[data-embed-theme="bridgeland"]`. To add a theme for another site, copy that block, change the name and colours, and add the name to both lists.
+- The resize message, iframe code and the "Price Calculator • Powered By AutomateX360" footer are the same in every theme.
 
 ### Private dashboard and public form links
 The root URL redirects unauthenticated visitors to `/login`. The dashboard routes (`/app` and `/index.html`) are enforced by the server and require the signed administrator session cookie. This is not a client-side visibility toggle: without a valid session, the dashboard HTML is never served.
